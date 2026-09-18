@@ -21,6 +21,7 @@ ENV/
 *.ipynb_checkpoints/
 
 # Data (large files — tracked via DVC or downloaded separately)
+data/
 data/artbench/
 data/*.tar
 data/*.zip
