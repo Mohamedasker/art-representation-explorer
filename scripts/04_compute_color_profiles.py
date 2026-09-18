@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pre-compute color and texture profiles for an ArtBench-10 split.
+Pre-compute color and texture profiles for an ArtBench-10 or WikiArt split.
 
 These profiles (hue, saturation, brightness, colorfulness, LBP entropy,
 GLCM features) are saved as an .npz file that can be reused across many
@@ -9,12 +9,12 @@ visualisation runs without re-reading the full image set each time.
 Usage
 -----
     python scripts/04_compute_color_profiles.py \\
-        --split train \\
-        --out representations/color_profiles_train.npz
+        --dataset artbench --split train \\
+        --out representations/artbench_color_profiles_train.npz
 
     python scripts/04_compute_color_profiles.py \\
-        --split test \\
-        --out representations/color_profiles_test.npz
+        --dataset wikiart --split test \\
+        --out representations/wikiart_color_profiles_test.npz
 """
 
 from __future__ import annotations
@@ -27,19 +27,26 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.datasets.artbench import ArtBenchDataset
+from src.datasets import build_dataset, default_data_dir
 from src.coloring.color_profile import compute_color_features
 from src.coloring.texture_colors import compute_texture_features
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Pre-compute color + texture profiles for ArtBench-10",
+        description="Pre-compute color + texture profiles for ArtBench-10 or WikiArt",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--data-dir", default="data/artbench",
-        help="Root directory of the ArtBench-10 dataset."
+        "--dataset", choices=["artbench", "wikiart"], default="artbench",
+        help="Which dataset to compute profiles for.",
+    )
+    parser.add_argument(
+        "--data-dir", default=None,
+        help=(
+            "Root directory of the dataset. Defaults to data/artbench or "
+            "data/wikiart depending on --dataset."
+        ),
     )
     parser.add_argument(
         "--split", choices=["train", "test", "both"], default="train",
@@ -59,12 +66,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    data_dir = args.data_dir or default_data_dir(args.dataset)
     splits = ["train", "test"] if args.split == "both" else [args.split]
 
     for split in splits:
-        print(f"\n── {split} split ──")
-        dataset = ArtBenchDataset(
-            root=args.data_dir,
+        print(f"\n── {args.dataset} | {split} split ──")
+        dataset = build_dataset(
+            args.dataset,
+            root=data_dir,
             split=split,
             return_path=False,
         )
@@ -89,7 +98,7 @@ def main() -> None:
             "label_names": label_names,
         }
 
-        out_path = Path(args.out or f"representations/color_profiles_{split}.npz")
+        out_path = Path(args.out or f"representations/{args.dataset}_color_profiles_{split}.npz")
         out_path.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(out_path, **all_feats)
         print(f"\n  Saved → {out_path}")

@@ -2,7 +2,7 @@
 
 A seminar project for the **RL Seminar** at the Institute for Computer Vision, University of Koblenz.
 
-We generate and compare image representations of the [ArtBench-10](https://github.com/liaopeiyuan/artbench) dataset using three families of models, then visualise them with PCA, UMAP, and t-SNE — coloured by a choice of semantic, perceptual, or cluster-based variables.
+We generate and compare image representations of the [ArtBench-10](https://github.com/liaopeiyuan/artbench) and [WikiArt](https://huggingface.co/datasets/huggan/wikiart) datasets using three families of models, then visualise them with PCA, UMAP, and t-SNE — coloured by a choice of semantic, perceptual, or cluster-based variables.
 
 ---
 
@@ -11,9 +11,17 @@ We generate and compare image representations of the [ArtBench-10](https://githu
 | Step | Script | What it produces |
 |------|--------|-----------------|
 | 1 | `scripts/01_download_artbench.py` | `data/artbench/{train,test}/<style>/*.jpg` |
-| 2 | `scripts/02_extract_features.py` | `representations/<model>_<split>.npz` |
-| 3 | `scripts/04_compute_color_profiles.py` | `representations/color_profiles_<split>.npz` |
+| 1 | `scripts/01_download_wikiart.py` | `data/wikiart/{train,test}/<style>/*.jpg` |
+| 2 | `scripts/02_extract_features.py --dataset {artbench,wikiart}` | `representations/<dataset>_<model>_<split>.npz` |
+| 3 | `scripts/04_compute_color_profiles.py --dataset {artbench,wikiart}` | `representations/<dataset>_color_profiles_<split>.npz` |
 | 4 | `scripts/03_visualize.py` | `visualizations/<stem>.png` + `.html` |
+
+### Supported datasets
+
+| `--dataset` value | Description | Styles | Split |
+|--------------------|-------------|--------|-------|
+| `artbench` (default) | [ArtBench-10](https://github.com/liaopeiyuan/artbench), 60k images, 256×256 px | 10 | official train/test |
+| `wikiart` | [WikiArt](https://huggingface.co/datasets/huggan/wikiart), ~81k images scraped from wikiart.org | 27 | synthesised (deterministic per-style split, `--test-fraction`, default 10%) |
 
 ### Supported models
 
@@ -60,40 +68,57 @@ cd art-representation-explorer
 pip install -r requirements.txt
 ```
 
-### 2. Download ArtBench-10
+### 2. Download a dataset
 
 ```bash
+# ArtBench-10 (~3 GB, official Berkeley tar by default)
 python scripts/01_download_artbench.py
+
+# WikiArt (~30 GB, via the huggan/wikiart HuggingFace mirror)
+python scripts/01_download_wikiart.py
 ```
 
-This uses the HuggingFace `datasets` library by default (~3 GB download).
+`01_download_artbench.py` downloads directly from the official Berkeley
+server by default (`--method direct`); pass `--method huggingface` to try
+HuggingFace mirrors instead. WikiArt has no official archive, so
+`01_download_wikiart.py` always goes through HuggingFace `datasets` and
+carves out its own train/test split (`--test-fraction`, default 10%) since
+the upstream dataset ships only one split.
 
 ### 3. Extract features
 
 ```bash
-# ResNet-50 with ImageNet weights
+# ResNet-50 with ImageNet weights, on ArtBench-10
 python scripts/02_extract_features.py \
     --model resnet50 \
+    --dataset artbench \
     --split train \
-    --out representations/resnet50_imagenet_train.npz
+    --out representations/artbench_resnet50_imagenet_train.npz
 
-# CLIP ViT-B/32
+# CLIP ViT-B/32, on WikiArt
 python scripts/02_extract_features.py \
     --model clip_vitb32 \
+    --dataset wikiart \
     --split train \
-    --out representations/clip_vitb32_train.npz
+    --out representations/wikiart_clip_vitb32_train.npz
 
 # DINOv2 ViT-B/14
 python scripts/02_extract_features.py \
     --model dinov2_vitb14 \
+    --dataset artbench \
     --split train \
-    --out representations/dinov2_vitb14_train.npz
+    --out representations/artbench_dinov2_vitb14_train.npz
 ```
+
+`--dataset` defaults to `artbench` and picks the matching default
+`--data-dir` (`data/artbench` or `data/wikiart`); pass `--data-dir` to
+override it.
 
 ### 4. Pre-compute color profiles (optional, speeds up visualisation)
 
 ```bash
-python scripts/04_compute_color_profiles.py --split train
+python scripts/04_compute_color_profiles.py --dataset artbench --split train
+python scripts/04_compute_color_profiles.py --dataset wikiart --split train
 ```
 
 ### 5. Visualise
@@ -165,12 +190,15 @@ visualize(proj.coords, colorvar, paths=bundle.paths,
 art-representation-explorer/
 ├── scripts/                 # Entry-point CLI scripts
 │   ├── 01_download_artbench.py
+│   ├── 01_download_wikiart.py
 │   ├── 02_extract_features.py
 │   ├── 03_visualize.py
 │   └── 04_compute_color_profiles.py
 ├── src/
 │   ├── datasets/
-│   │   └── artbench.py      # ArtBench PyTorch Dataset
+│   │   ├── artbench.py      # ArtBench PyTorch Dataset
+│   │   ├── wikiart.py       # WikiArt PyTorch Dataset
+│   │   └── __init__.py      # `--dataset` name → Dataset class registry
 │   ├── models/
 │   │   ├── base_extractor.py   # Abstract base + RepresentationBundle
 │   │   ├── cnn_extractor.py    # ResNet / EfficientNet / ViT via timm

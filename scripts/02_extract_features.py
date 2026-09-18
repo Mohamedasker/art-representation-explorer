@@ -1,33 +1,37 @@
 #!/usr/bin/env python3
 """
-Extract image representations for the ArtBench-10 dataset.
+Extract image representations for ArtBench-10 or WikiArt.
 
 Usage examples
 --------------
-# ResNet-50 (ImageNet pretrained) on the training split:
+# ResNet-50 (ImageNet pretrained) on the ArtBench-10 training split:
     python scripts/02_extract_features.py \\
         --model resnet50 \\
+        --dataset artbench \\
         --split train \\
-        --out representations/resnet50_imagenet_train.npz
+        --out representations/artbench_resnet50_imagenet_train.npz
 
-# CLIP ViT-B/32:
+# CLIP ViT-B/32 on WikiArt:
     python scripts/02_extract_features.py \\
         --model clip_vitb32 \\
+        --dataset wikiart \\
         --split train \\
-        --out representations/clip_vitb32_train.npz
+        --out representations/wikiart_clip_vitb32_train.npz
 
 # DINOv2 ViT-B/14:
     python scripts/02_extract_features.py \\
         --model dinov2_vitb14 \\
+        --dataset artbench \\
         --split train \\
-        --out representations/dinov2_vitb14_train.npz
+        --out representations/artbench_dinov2_vitb14_train.npz
 
 # Custom checkpoint (ResNet fine-tuned on ArtBench):
     python scripts/02_extract_features.py \\
         --model resnet50 \\
         --checkpoint checkpoints/resnet50_artbench.pth \\
+        --dataset artbench \\
         --split train \\
-        --out representations/resnet50_artbench_train.npz
+        --out representations/artbench_resnet50_artbench_train.npz
 """
 
 from __future__ import annotations
@@ -41,7 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from torchvision import transforms
 
-from src.datasets.artbench import ArtBenchDataset
+from src.datasets import build_dataset, default_data_dir
 from src.models.base_extractor import RepresentationBundle
 
 
@@ -91,6 +95,12 @@ def main() -> None:
         help="Path to a fine-tuned checkpoint (.pt / .pth). Optional.",
     )
     parser.add_argument(
+        "--dataset",
+        choices=["artbench", "wikiart"],
+        default="artbench",
+        help="Which dataset to extract features from.",
+    )
+    parser.add_argument(
         "--split",
         choices=["train", "test", "both"],
         default="train",
@@ -98,8 +108,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--data-dir",
-        default="data/artbench",
-        help="Root directory of the ArtBench-10 dataset.",
+        default=None,
+        help=(
+            "Root directory of the dataset. Defaults to data/artbench or "
+            "data/wikiart depending on --dataset."
+        ),
     )
     parser.add_argument(
         "--out",
@@ -128,6 +141,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    data_dir = args.data_dir or default_data_dir(args.dataset)
+
     extractor = _get_extractor(
         args.model,
         checkpoint=args.checkpoint,
@@ -142,9 +157,10 @@ def main() -> None:
     splits = ["train", "test"] if args.split == "both" else [args.split]
 
     for split in splits:
-        print(f"\n── Extracting  {args.model}  |  split={split} ──")
-        dataset = ArtBenchDataset(
-            root=args.data_dir,
+        print(f"\n── Extracting  {args.model}  |  dataset={args.dataset}  |  split={split} ──")
+        dataset = build_dataset(
+            args.dataset,
+            root=data_dir,
             split=split,
             transform=transform,
             return_path=True,
@@ -155,7 +171,7 @@ def main() -> None:
             out_path = args.out
         else:
             model_slug = args.model.replace("/", "_").replace(":", "_")
-            out_path = f"representations/{model_slug}_{split}.npz"
+            out_path = f"representations/{args.dataset}_{model_slug}_{split}.npz"
 
         bundle = extractor.extract(
             dataset,

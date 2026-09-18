@@ -26,6 +26,7 @@ pandas>=2.0.0
 
 # CLI & utilities
 tqdm>=4.66.0
+datasets>=2.20.0
 requests>=2.31.0
 rich>=13.0.0                 # pretty terminal output
 
