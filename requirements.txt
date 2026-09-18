@@ -1,0 +1,34 @@
+# Core
+torch>=2.1.0
+torchvision>=0.16.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# Feature extraction
+open-clip-torch>=2.24.0      # CLIP (OpenAI + LAION variants)
+timm>=0.9.0                  # pretrained CNNs incl. ResNet, ViT, EfficientNet
+
+# Self-supervised (DINO)
+# dinov2 is loaded via torch.hub, no pip package needed
+
+# Dimensionality reduction
+scikit-learn>=1.3.0          # PCA, t-SNE
+umap-learn>=0.5.4            # UMAP
+
+# Coloring / clustering
+scipy>=1.11.0
+scikit-image>=0.22.0         # texture / color profile features
+
+# Visualization
+matplotlib>=3.7.0
+plotly>=5.18.0
+pandas>=2.0.0
+
+# CLI & utilities
+tqdm>=4.66.0
+requests>=2.31.0
+rich>=13.0.0                 # pretty terminal output
+
+# Notebook (optional)
+jupyterlab>=4.0.0
+ipywidgets>=8.0.0

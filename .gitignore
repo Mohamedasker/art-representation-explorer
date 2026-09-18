@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# Data (large files — tracked via DVC or downloaded separately)
+data/artbench/
+data/*.tar
+data/*.zip
+data/*.tar.gz
+
+# Representations (regenerate with scripts)
+representations/*.npz
+representations/*.h5
+
+# Outputs
+visualizations/*.html
+visualizations/*.png
+visualizations/*.pdf
+visualizations/*.svg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# Logs
+*.log
+logs/
+
+# Model checkpoints (too large for Git — use DVC or HuggingFace)
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Environment
+.env
+.env.local

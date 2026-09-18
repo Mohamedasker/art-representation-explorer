@@ -1,0 +1,111 @@
+"""
+Self-supervised learning feature extractor.
+
+Supports:
+- **DINOv2** (Meta AI, 2023) — loaded via ``torch.hub``.
+- **DINO** (Meta AI, 2021) — loaded via ``torch.hub``.
+- Any **timm** model with pretrained SSL weights (e.g. ``"vit_base_patch16_224.dino"``)
+  by delegating to :class:`~src.models.cnn_extractor.CNNExtractor`.
+
+DINOv2 features are strong general-purpose image descriptors that work
+remarkably well on artistic images without any fine-tuning.
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+import torch
+import torch.nn.functional as F
+
+from .base_extractor import BaseExtractor
+
+
+# ── Available SSL models ──────────────────────────────────────────────────────
+
+SSL_MODELS: dict[str, dict] = {
+    # DINOv2 (ViT-S/14, ViT-B/14, ViT-L/14, ViT-G/14)
+    "dinov2_vits14": {"hub": "facebookresearch/dinov2", "fn": "dinov2_vits14", "dim": 384},
+    "dinov2_vitb14": {"hub": "facebookresearch/dinov2", "fn": "dinov2_vitb14", "dim": 768},
+    "dinov2_vitl14": {"hub": "facebookresearch/dinov2", "fn": "dinov2_vitl14", "dim": 1024},
+    "dinov2_vitg14": {"hub": "facebookresearch/dinov2", "fn": "dinov2_vitg14", "dim": 1536},
+    # DINO (ViT-S/16, ViT-B/16 — from 2021 paper)
+    "dino_vits16":   {"hub": "facebookresearch/dino:main", "fn": "dino_vits16", "dim": 384},
+    "dino_vitb16":   {"hub": "facebookresearch/dino:main", "fn": "dino_vitb16", "dim": 768},
+    "dino_resnet50": {"hub": "facebookresearch/dino:main", "fn": "dino_resnet50", "dim": 2048},
+}
+
+
+class SSLExtractor(BaseExtractor):
+    """
+    Extract features from a self-supervised model loaded via ``torch.hub``.
+
+    Parameters
+    ----------
+    model_id:
+        One of the keys in :data:`SSL_MODELS`, e.g. ``"dinov2_vitb14"``.
+    normalize:
+        L2-normalise the output features.
+    device / batch_size / num_workers:
+        Inherited from :class:`~src.models.base_extractor.BaseExtractor`.
+    """
+
+    def __init__(
+        self,
+        model_id: str = "dinov2_vitb14",
+        normalize: bool = True,
+        device: Optional[str] = None,
+        batch_size: int = 32,   # DINOv2 models are large; smaller default
+        num_workers: int = 4,
+    ) -> None:
+        super().__init__(device=device, batch_size=batch_size, num_workers=num_workers)
+
+        if model_id not in SSL_MODELS:
+            raise ValueError(
+                f"Unknown SSL model: {model_id!r}.  "
+                f"Available: {list(SSL_MODELS.keys())}"
+            )
+        self._model_id = model_id
+        self._cfg = SSL_MODELS[model_id]
+        self._normalize = normalize
+
+    # ── BaseExtractor interface ───────────────────────────────────────────────
+
+    @property
+    def model_name(self) -> str:
+        return self._model_id
+
+    @property
+    def layer_name(self) -> str:
+        return "cls_token"
+
+    def _build_model(self):
+        model = torch.hub.load(
+            self._cfg["hub"],
+            self._cfg["fn"],
+            pretrained=True,
+            verbose=False,
+        )
+        return model
+
+    def _get_transform(self):
+        """Standard ImageNet-normalised 224×224 crop used by DINO/DINOv2."""
+        from torchvision import transforms
+        return transforms.Compose([
+            transforms.Resize(256, interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=(0.485, 0.456, 0.406),
+                std=(0.229, 0.224, 0.225),
+            ),
+        ])
+
+    def _forward(self, batch: torch.Tensor) -> torch.Tensor:
+        feats = self.model(batch)
+        # DINOv2 returns a plain tensor; older DINO may return dict in some modes
+        if isinstance(feats, dict):
+            feats = feats.get("x_norm_clstoken", feats.get("out", feats))
+        if self._normalize:
+            feats = F.normalize(feats.float(), dim=-1)
+        return feats.float()

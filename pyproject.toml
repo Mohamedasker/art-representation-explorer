@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "art-representation-explorer"
+version = "0.1.0"
+description = "Generate, compare and visualise image representations from CNNs, CLIP and self-supervised models on the ArtBench-10 dataset."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Computer Vision Koblenz", email = "asker@uni-koblenz.de" }
+]
+keywords = ["representation learning", "art", "CNN", "CLIP", "UMAP", "t-SNE", "visualisation"]
+
+[project.scripts]
+download-artbench  = "scripts.download_artbench:main"
+extract-features   = "scripts.extract_features:main"
+visualize          = "scripts.visualize:main"
+compute-colors     = "scripts.compute_color_profiles:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
