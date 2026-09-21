@@ -28,14 +28,10 @@ data/*.zip
 data/*.tar.gz
 
 # Representations (regenerate with scripts)
-representations/*.npz
-representations/*.h5
+representations/
 
 # Outputs
-visualizations/*.html
-visualizations/*.png
-visualizations/*.pdf
-visualizations/*.svg
+visualizations/
 
 # IDE
 .vscode/
