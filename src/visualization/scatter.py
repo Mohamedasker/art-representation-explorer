@@ -241,11 +241,9 @@ def plot_plotly(
     plotly_cmap = _mpl_to_plotly_cmap(cmap_name, is_cat, values)
 
     scatter_fn = px.scatter_3d if is_3d else px.scatter
-    fig = scatter_fn(
-        df,
+    scatter_kwargs: dict = dict(
         x="x",
         y="y",
-        z="z" if is_3d else None,
         color="color_name" if is_cat else "color_value",
         color_discrete_sequence=plotly_cmap if is_cat else None,
         color_continuous_scale=plotly_cmap if not is_cat else None,
@@ -254,6 +252,9 @@ def plot_plotly(
         labels={"color_value": cb_label, "color_name": cb_label},
         opacity=opacity,
     )
+    if is_3d:
+        scatter_kwargs["z"] = "z"
+    fig = scatter_fn(df, **scatter_kwargs)
 
     fig.update_traces(marker=dict(size=point_size))
     fig.update_layout(
