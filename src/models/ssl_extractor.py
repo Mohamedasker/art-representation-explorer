@@ -23,12 +23,19 @@ from .base_extractor import BaseExtractor
 
 # ── Available SSL models ──────────────────────────────────────────────────────
 
+
+# DINOv2's `main` branch has since added `float | None` (PEP 604) type hints
+# in dinov2/layers/attention.py, which crashes on Python < 3.10
+# (see https://github.com/facebookresearch/dinov2/pull/539, still unmerged).
+# Pin to the last commit before that break instead of tracking `main`.
+_DINOV2_REF = "81b2b6419385a321287de91e00282ef7cbd26f94"
+
 SSL_MODELS: dict[str, dict] = {
     # DINOv2 (ViT-S/14, ViT-B/14, ViT-L/14, ViT-G/14)
-    "dinov2_vits14": {"hub": "facebookresearch/dinov2", "fn": "dinov2_vits14", "dim": 384},
-    "dinov2_vitb14": {"hub": "facebookresearch/dinov2", "fn": "dinov2_vitb14", "dim": 768},
-    "dinov2_vitl14": {"hub": "facebookresearch/dinov2", "fn": "dinov2_vitl14", "dim": 1024},
-    "dinov2_vitg14": {"hub": "facebookresearch/dinov2", "fn": "dinov2_vitg14", "dim": 1536},
+    "dinov2_vits14": {"hub": f"facebookresearch/dinov2:{_DINOV2_REF}", "fn": "dinov2_vits14", "dim": 384},
+    "dinov2_vitb14": {"hub": f"facebookresearch/dinov2:{_DINOV2_REF}", "fn": "dinov2_vitb14", "dim": 768},
+    "dinov2_vitl14": {"hub": f"facebookresearch/dinov2:{_DINOV2_REF}", "fn": "dinov2_vitl14", "dim": 1024},
+    "dinov2_vitg14": {"hub": f"facebookresearch/dinov2:{_DINOV2_REF}", "fn": "dinov2_vitg14", "dim": 1536},
     # DINO (ViT-S/16, ViT-B/16 — from 2021 paper)
     "dino_vits16":   {"hub": "facebookresearch/dino:main", "fn": "dino_vits16", "dim": 384},
     "dino_vitb16":   {"hub": "facebookresearch/dino:main", "fn": "dino_vitb16", "dim": 768},
