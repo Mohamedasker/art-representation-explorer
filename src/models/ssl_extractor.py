@@ -13,6 +13,9 @@ remarkably well on artistic images without any fine-tuning.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -41,6 +44,45 @@ SSL_MODELS: dict[str, dict] = {
     "dino_vitb16":   {"hub": "facebookresearch/dino:main", "fn": "dino_vitb16", "dim": 768},
     "dino_resnet50": {"hub": "facebookresearch/dino:main", "fn": "dino_resnet50", "dim": 2048},
 }
+
+
+def _local_dinov2_clone(ref: str) -> Path:
+    """
+    Ensure a local git clone of facebookresearch/dinov2 pinned at ``ref``
+    exists under the torch.hub cache dir, and return its path.
+
+    torch.hub's github loader refuses an arbitrary commit SHA that isn't the
+    tip of a branch or tag (``_validate_not_a_forked_repo``), even though the
+    commit is a legitimate part of the repo's history. Cloning it ourselves
+    and loading with ``source="local"`` sidesteps that check.
+    """
+    cache_dir = Path(torch.hub.get_dir())
+    dest = cache_dir / f"facebookresearch_dinov2_{ref}"
+    if dest.is_dir():
+        return dest
+
+    tmp_dest = dest.with_name(dest.name + ".tmp")
+    if tmp_dest.exists():
+        shutil.rmtree(tmp_dest)
+    tmp_dest.mkdir(parents=True)
+
+    try:
+        subprocess.run(["git", "init", "-q"], cwd=tmp_dest, check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", "https://github.com/facebookresearch/dinov2.git"],
+            cwd=tmp_dest, check=True,
+        )
+        subprocess.run(
+            ["git", "fetch", "-q", "--depth", "1", "origin", ref],
+            cwd=tmp_dest, check=True,
+        )
+        subprocess.run(["git", "checkout", "-q", "FETCH_HEAD"], cwd=tmp_dest, check=True)
+    except Exception:
+        shutil.rmtree(tmp_dest, ignore_errors=True)
+        raise
+
+    tmp_dest.rename(dest)
+    return dest
 
 
 class SSLExtractor(BaseExtractor):
@@ -87,12 +129,23 @@ class SSLExtractor(BaseExtractor):
         return "cls_token"
 
     def _build_model(self):
-        model = torch.hub.load(
-            self._cfg["hub"],
-            self._cfg["fn"],
-            pretrained=True,
-            verbose=False,
-        )
+        repo, _, ref = self._cfg["hub"].partition(":")
+        if repo == "facebookresearch/dinov2" and ref == _DINOV2_REF:
+            repo_dir = _local_dinov2_clone(ref)
+            model = torch.hub.load(
+                str(repo_dir),
+                self._cfg["fn"],
+                source="local",
+                pretrained=True,
+                verbose=False,
+            )
+        else:
+            model = torch.hub.load(
+                self._cfg["hub"],
+                self._cfg["fn"],
+                pretrained=True,
+                verbose=False,
+            )
         return model
 
     def _get_transform(self):
