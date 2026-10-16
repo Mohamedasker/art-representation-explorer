@@ -160,6 +160,33 @@ Each run produces:
 
 ---
 
+## Training an autoencoder (ArtBench-10 + WikiArt)
+
+`scripts/07_train_autoencoder.py` trains a convolutional autoencoder
+(`src/models/autoencoder.py`, reconstruction loss = L1 + MSE) on the union of the
+ArtBench-10 and WikiArt **train** splits and validates on the held-out **test**
+splits.  It uses DDP, logs to [Weights & Biases](https://wandb.ai)
+(train/val loss, PSNR, learning rate, input-vs-reconstruction grids, full config) and
+writes everything into a fresh `runs/<YYYYmmdd-HHMMSS>_<name>/` directory
+(`config.json`, `checkpoints/`, `autoencoder_final.pt`, `train.log`, `metrics.jsonl`,
+`recon/`, `wandb/`).
+
+```bash
+# 4 GPUs on one JURECA devel node (account jinm16): smoke test, then training
+sbatch scripts/slurm/train_autoencoder.sbatch
+
+# continue after the 2 h devel limit (same run dir, same wandb run)
+RESUME=runs/<stamp>_ae_union sbatch scripts/slurm/train_autoencoder.sbatch
+
+# by hand
+torchrun --standalone --nproc_per_node=4 scripts/07_train_autoencoder.py --epochs 30
+```
+
+One-time: `wandb login` on the login node (stores the key in `~/.netrc`).  Compute nodes
+without internet fall back to offline mode automatically; sync afterwards from the
+login node with `wandb sync runs/<run>/wandb/offline-run-*`.  Force a mode with
+`--wandb {online,offline,disabled}` or `WANDB_MODE`.
+
 ## Using representations programmatically
 
 ```python
