@@ -264,6 +264,11 @@ if ((D.sets || []).length > 1) {                 // other sample sets / the full
 }
 $("nav").innerHTML = `<a href="index.html">&#8962; overview</a> &middot; ` + D.siblings.map(s =>
   `<a href="${s.href}" class="${s.current ? "cur" : ""}">${s.name}</a>`).join("");
+if (D.siblings.length > 8) {                     // many models: a drop-down instead of a link per model
+  $("nav").innerHTML = `<a href="index.html">&#8962; overview</a> &middot; <select id="navsel" title="other representations of this dataset">` +
+    D.siblings.map(s => `<option value="${s.href}"${s.current ? " selected" : ""}>${s.name}</option>`).join("") + `</select>`;
+  $("navsel").addEventListener("change", () => { location.href = $("navsel").value; });
+}
 
 // ── state ──
 const map = $("map"), g = map.getContext("2d");
