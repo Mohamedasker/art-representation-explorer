@@ -187,6 +187,82 @@ without internet fall back to offline mode automatically; sync afterwards from t
 login node with `wandb sync runs/<run>/wandb/offline-run-*`.  Force a mode with
 `--wandb {online,offline,disabled}` or `WANDB_MODE`.
 
+## SimCLR representations and augmentation sets
+
+Contrastive self-supervised representations (SimCLR, Chen et al. 2020) of ArtBench-10 and WikiArt, and a family of SimCLR
+models trained with different **augmentation sets** to study how the augmentations shape the representation.
+
+| Model | Weights | File slug (`representations/<dataset>_<slug>_{train,test,all}.npz`) |
+|-------|---------|------|
+| `simclr_imagenet` | published ImageNet-1k SimCLR v1 ResNet-50 (1x), frozen ([lightly-ai/simclrv1-imagenet1k-resnet50-1x](https://huggingface.co/lightly-ai/simclrv1-imagenet1k-resnet50-1x), converted official checkpoint; ImageNet itself is not available locally, so no ImageNet training here) | `simclr_imagenet` |
+| `simclr` + `--checkpoint` | ResNet-50 SimCLR trained **from scratch** here on the train split of ONE dataset with augmentation set `<aug>` | `simclr_<artbench\|wikiart>_<aug>` |
+
+*Embedding* = global-average-pooled ResNet-50 output (2048-D, before the projection head). Input: Resize 256, CenterCrop 224
+(the published ImageNet weights expect raw [0, 1] pixels, ours ImageNet mean/std).
+*Recipe*: ResNet-50 + 2-layer projection head (2048-2048-128), NT-Xent (temperature 0.2) over the whole global batch (4 GPUs x 256 = 1024
+images, negatives gathered across GPUs with gradients), SyncBN, LARS (base lr 0.3 x batch/256, weight decay 1e-6), 10 warm-up epochs + cosine,
+224 px views, bf16, **200 epochs** for every set and dataset (so variants are comparable).
+Monitors logged to wandb every 10 epochs: kNN (k=20) and linear-probe accuracy on the style labels (10k train -> 4k test images), loss,
+positive-pair accuracy, and example view pairs (`samples/aug_views`, also in `runs/<run>/views/`).
+
+```bash
+python scripts/13_train_simclr.py --list-aug-sets
+# 4 GPUs (smoke test first, then the run; self-resubmitting with CHAIN=1; devel 2 h limit, or any partition with --partition/--time)
+DATASET=artbench AUG_SET=baseline TRAIN_ARGS="--epochs 200" CHAIN=1 NEXT_TIME=02:00:00 sbatch scripts/slurm/train_simclr.sbatch
+RESUME=runs/<stamp>_simclr_artbench_baseline sbatch scripts/slurm/train_simclr.sbatch
+# embeddings (train + test + merged), then the explorer pages
+ENTRIES="imagenet@artbench,wikiart runs/<run>/simclr_final.pt@artbench" sbatch scripts/slurm/embed_simclr.sbatch
+python scripts/14_preview_augmentations.py --dataset wikiart      # grids of all sets -> visualizations/aug_sets/
+```
+
+Augmentation sets are defined in [`configs/aug_sets.yaml`](configs/aug_sets.yaml) (ops: `src/augmentations/ops.py`) and selected by `--aug-set`;
+each run's `config.json` stores the set's description and op list. Every view = crop + the listed ops, applied independently per view
+(`p` = probability per view).
+
+| `--aug-set` | Crop | Photometric / other | Purpose |
+|---|---|---|---|
+| `baseline` | RRC scale 0.08-1 | flip 0.5; colour jitter (0.8, 0.8, 0.8, 0.2) p 0.8; grayscale 0.2; blur sigma 0.1-2 p 0.5 | standard SimCLR v1 reference |
+| `color_heavy` | RRC 0.08-1 | flip; colour jitter (0.9, 0.9, 0.9, **0.5**) p 1.0; channel shuffle 0.5; channel drop 0.3; grayscale 0.5; solarize 0.5; posterize 0.3; blur 0.5 | invariance to colour / palette |
+| `edge_texture` | RRC **0.05-0.4** (local texture crops) | flip; weak jitter (0.4, 0.4, 0.4, 0.1); grayscale 0.2; sharpen **or** strong blur (sigma 2-6) p 0.5; one of Sobel / Laplacian edge map, high-pass, edge-enhance p 0.5; patch shuffle (2x2-4x4 tiles) p 0.5 | reliance on edge / texture statistics instead of layout and palette |
+| `rotation` | RRC 0.08-1 + rotation **0-360 deg** (corner-free) | hflip + vflip; baseline colour / blur | rotation invariance |
+| `geometry_heavy` | RRC **0.02-1**, ratio 0.5-2 | flip; rotation +-30 deg p 0.5; perspective 0.5 p 0.7; shear 20 deg p 0.5; baseline colour / blur | viewpoint / layout invariance |
+| `no_color` | RRC 0.08-1 | flip; brightness/contrast jitter; **grayscale p 1.0**; blur 0.5 | no colour information at all |
+| `blur_heavy` | RRC 0.08-1 | flip; baseline colour; **blur sigma 2-8 p 1.0**; noise 0.3 | destroys fine texture/edges; colour + low-frequency layout remain |
+| `crop_only` | RRC 0.08-1 | flip only | control: colour histogram becomes a shortcut |
+
+Training details of every run: `runs/<stamp>_simclr_<dataset>_<aug set>/` (config.json, metrics.jsonl, views/, checkpoints/, status.json,
+simclr_final.pt). Results table (run dir, wandb run, probe accuracy): see `docs/simclr_runs.md` once the runs are done.
+
+---
+
+## Explicit images are hidden in the explorer by default
+
+Paintings with nudity are flagged automatically and **hidden by default** in every explorer page, the overview and the feature-map
+viewer: they are not drawn, cannot be hovered, selected or listed, and their image files are never requested. The header checkbox
+"show explicit images" (also in the overview's hero box) turns the filter off; the choice is stored in the browser (one key,
+`artExplorer.showExplicit`) and shared by all pages.
+
+A flag is raised when ANY of these signals fires (so it errs on the side of hiding): NudeNet >= 0.6, CLIP ViT-L/14 zero-shot >= 0.9,
+a logistic-regression probe on CLIP ViT-L/14 features trained on WikiArt's `nude_painting` genre label (>= 0.40), the dataset's own
+label (WikiArt genre `nude_painting`; ArtBench titles with nude / naked / ...), or the CLIP ViT-B/32 "nudity" concept score that
+the maps can be coloured by (>= 2.5, about the top 7 %). Currently about 9.7 % of ArtBench-10 and 9.6 % of WikiArt are flagged.
+The flags are imperfect: some nudes are missed, and some statues, abstract body forms and clothed figures are hidden.
+
+```bash
+pip install nudenet                                    # also installs onnxruntime
+python scripts/15_flag_nudity.py                       # detectors on all images (uses the explorer thumbnails) -> data/nudity/
+python scripts/16_train_nudity_probe.py                # score every signal against the WikiArt genre labels, train the probe
+python scripts/15_flag_nudity.py --flags-only          # re-apply thresholds (--nn-thr / --clip-thr / --probe-thr / --clip32-thr)
+python scripts/rerender_explorer.py                    # put the flags into the existing pages (no recomputation)
+```
+
+`scripts/08_build_explorer.py` reads `data/nudity/flags.npz` for every new page (`src/metadata/nudity.py`), so pages of new models
+need no extra step as long as the flags exist. `data/` is not versioned: regenerate the flags with the commands above.
+**The hiding is done in the page only**: the flagged thumbnail files are still in `visualizations/explorer/thumbs/` (and in
+`featuremaps/data/`), so do not publish those folders as they are if the audience must not be able to reach them.
+
+---
+
 ## Using representations programmatically
 
 ```python

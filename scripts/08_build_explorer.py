@@ -58,26 +58,23 @@ from sklearn.preprocessing import normalize
 from src.coloring.palette import (assign_to_reference, compute_palettes, palette_histograms,
                                   reference_palette, theme_clusters)
 from src.metadata.attributes import load_attributes
+from src.metadata.nudity import load_flags
 from src.models.base_extractor import RepresentationBundle
 from src.reduction.dimensionality import umap
-from src.visualization.explorer import write_explorer
+from src.visualization.explorer import write_explorer, write_meta
+from src.visualization.style_colors import style_colors
 from src.visualization.landing import write_index
 
 _SKIP_SUBSTRINGS = ("color_profiles",)
 
 
-def _find_representations(repr_dir: Path, prefer_all: bool = False, with_all: bool = False) -> list[Path]:
-    """Representation bundles.  By default train and test stay separate (<dataset>_<model>_train / _test
-    files; merged *_all.npz files are ignored).  With ``prefer_all`` the merged files are used instead and the
-    per-split files of the same model are skipped."""
+def _find_representations(repr_dir: Path, prefer_all: bool = True) -> list[Path]:
+    """Representation bundles to explore: the merged <dataset>_<model>_all.npz files (train + test in one space,
+    scripts/merge_splits.py), or with ``prefer_all=False`` the separate per-split files."""
     files = [f for f in sorted(repr_dir.glob("*.npz")) if not any(s in f.name for s in _SKIP_SUBSTRINGS)]
-    if with_all:
-        return files
-    if not prefer_all:
-        return [f for f in files if not f.name.endswith("_all.npz")]
-    whole = {f.name[:-len("_all.npz")] for f in files if f.name.endswith("_all.npz")}
-    return [f for f in files if not (f.name.endswith(("_train.npz", "_test.npz"))
-                                    and f.name.rsplit("_", 1)[0] in whole)]
+    if prefer_all:
+        return [f for f in files if f.name.endswith("_all.npz")]
+    return [f for f in files if f.name.endswith(("_train.npz", "_test.npz"))]
 
 
 # ── caching ───────────────────────────────────────────────────────────────────
@@ -160,22 +157,37 @@ def load_palettes(thumb_dir: Path, names: list[str], cache_file: Path,
                   n_colors: int, workers: int) -> dict[str, np.ndarray]:
     """Palettes for the given thumbnails; computed once per thumbnail and cached in one .npz."""
     fields = ("colors", "weights", "lightness", "chroma")
-    store: dict[str, dict] = {}
+    # name -> row of the cached arrays (each array is decompressed ONCE; indexing z[f][i] inside a loop would
+    # decompress the whole array for every row)
+    arrays: dict[str, np.ndarray] = {}
+    row: dict[str, int] = {}
     if cache_file.exists():
         z = np.load(cache_file, allow_pickle=False)
-        for i, nm in enumerate(z["names"]):
-            store[str(nm)] = {f: z[f][i] for f in fields}
-    missing = [nm for nm in dict.fromkeys(names) if nm not in store]
+        arrays = {f: z[f] for f in fields}
+        row = {str(nm): i for i, nm in enumerate(z["names"])}
+    missing = [nm for nm in dict.fromkeys(names) if nm not in row]
     print(f"  palettes: {len(missing)} new / {len(names)}")
     if missing:
         res = compute_palettes([thumb_dir / nm for nm in missing], n_colors=n_colors, workers=workers)
-        for i, nm in enumerate(missing):
-            store[nm] = {f: res[f][i] for f in fields}
+        keys = list(row) + missing
+        arrays = {f: (np.concatenate([arrays[f], np.asarray(res[f])]) if row else np.asarray(res[f])) for f in fields}
+        row = {k: i for i, k in enumerate(keys)}
         cache_file.parent.mkdir(parents=True, exist_ok=True)
-        keys = list(store)
-        np.savez_compressed(cache_file, names=np.array(keys),
-                            **{f: np.stack([store[k][f] for k in keys]) for f in fields})
-    return {f: np.stack([store[nm][f] for nm in names]) for f in fields}
+        if cache_file.exists():                  # another build job may have added entries meanwhile: keep them
+            z = np.load(cache_file, allow_pickle=False)
+            theirs = [str(nm) for nm in z["names"]]
+            extra = [i for i, nm in enumerate(theirs) if nm not in row]
+            if extra:
+                for f in fields:
+                    arrays[f] = np.concatenate([arrays[f], z[f][extra]])
+                for i in extra:
+                    row[theirs[i]] = len(row)
+                keys = list(row)
+        tmp = cache_file.with_name(f"{cache_file.stem}.{os.getpid()}.tmp.npz")   # unique per process
+        np.savez_compressed(tmp, names=np.array(keys), **arrays)
+        tmp.replace(cache_file)
+    sel = np.array([row[nm] for nm in names])
+    return {f: arrays[f][sel] for f in fields}
 
 
 # ── painting date from the file name ──────────────────────────────────────────
@@ -208,24 +220,33 @@ def _path_key(p: str) -> str:
     return "/".join(Path(str(p)).parts[-3:])          # train/<style>/<file>
 
 
-def load_attrs(stem: str, paths: np.ndarray, attr_dir: Path) -> list[dict]:
+def load_attr_arrays(stem: str, paths: np.ndarray, attr_dir: Path):
+    """(defs, {key: array aligned with ``paths``}) from the attribute file of this representation, or None."""
     m = re.match(r"(artbench|wikiart)_.*_(train|test|all)$", stem)
     f = attr_dir / f"{m.group(1)}_{m.group(2)}.npz" if m else None
     if f is None or not f.exists():
         print("  attributes: none (run scripts/09_build_attributes.py)")
-        return []
+        return None
     apaths, defs, arrs = load_attributes(f)
     row = {_path_key(p): i for i, p in enumerate(apaths)}
     sel = np.array([row.get(_path_key(p), -1) for p in paths])
     if (sel < 0).any():
         print(f"  attributes: {int((sel < 0).sum())} / {len(sel)} samples missing in {f.name}; skipped")
+        return None
+    print(f"  attributes: {len(defs)} from {f.name}")
+    return defs, {d["key"]: arrs[d["key"]][sel] for d in defs}
+
+
+def encode_attrs(attr, idx: np.ndarray) -> list[dict]:
+    """Page payload for the attributes of the images ``idx``: compact base64 typed arrays (decoded in the page):
+    num -> uint16 over [lo, hi] (65535 = n/a), cat -> int16 (-1 = unknown), colour -> int32 (-1 = n/a)."""
+    if attr is None:
         return []
+    defs, arrays = attr
     out = []
     for d in defs:
-        v = arrs[d["key"]][sel]
+        v = arrays[d["key"]][idx]
         item = dict(d)
-        # compact base64 typed arrays (decoded in the page): num -> uint16 over [lo, hi] (65535 = n/a),
-        # cat -> int16 (-1 = unknown), colour -> int32 (-1 = n/a)
         if d["kind"] == "num":
             v = v.astype(float)
             ok = ~np.isnan(v)
@@ -238,8 +259,13 @@ def load_attrs(stem: str, paths: np.ndarray, attr_dir: Path) -> list[dict]:
         else:
             item["b64"] = _b64(v.astype(np.int16))
         out.append(item)
-    print(f"  attributes: {len(out)} from {f.name}")
     return out
+
+
+def load_attrs(stem: str, paths: np.ndarray, attr_dir: Path) -> list[dict]:
+    """All attributes for ``paths`` (used by scripts/rerender_explorer.py)."""
+    attr = load_attr_arrays(stem, paths, attr_dir)
+    return encode_attrs(attr, np.arange(len(paths))) if attr else []
 
 
 # ── data for the neighbour / interpolation modes of the viewer ────────────────
@@ -274,217 +300,231 @@ def neighbour_payload(X: np.ndarray, Z: np.ndarray, ev: np.ndarray, k: int = 30,
 
 # ── per-representation pipeline ───────────────────────────────────────────────
 
-def set_page(stem: str, kind: str, j: int = 0) -> str:
-    return {"default": f"{stem}.html", "extra": f"{stem}__set{j + 1}.html", "full": f"{stem}__all.html"}[kind]
+# ── one embedding space per representation, many views (subsets) of it ───────────────────────────────
+
+SUBSET_ORDER = ["s1", "s2", "train", "test", "all"]
 
 
-def set_label(kind: str, j: int, n: int) -> str:
-    return {"default": f"{n:,} samples (set 1)", "extra": f"{n:,} other samples (set {j + 2})",
-            "full": f"all {n:,} images"}[kind]
+def set_page(stem: str, key: str) -> str:
+    return f"{stem}.html" if key == "s1" else f"{stem}__{key}.html"
 
 
-def choose_indices(n_total: int, args, kind: str, j: int = 0) -> np.ndarray:
-    """default: the original random sample; extra j: a further sample disjoint from all earlier ones; full: everything."""
-    n = min(args.n_samples, n_total)
-    rng = np.random.default_rng(args.seed)
-    first = np.sort(rng.choice(n_total, size=n, replace=False))
-    if kind == "default":
-        return first
-    if kind == "full":
-        return np.arange(n_total)
-    used = first                                     # extra j (0-based) is the (j+2)-th sample overall
-    for t in range(1, j + 2):
-        remaining = np.setdiff1d(np.arange(n_total), used)
-        pick = np.sort(np.random.default_rng(args.seed + t).choice(remaining, size=min(n, len(remaining)), replace=False))
-        if t == j + 1:
-            return pick
-        used = np.union1d(used, pick)
+def splits_of(paths) -> np.ndarray:
+    def one(p: str) -> str:
+        parts = Path(str(p)).parts
+        return next((sp for sp in ("train", "test") if sp in parts), "")
+    return np.array([one(p) for p in paths], dtype=str)
 
 
-def build(repr_path: Path, args, out_dir: Path, kind: str = "default", j: int = 0) -> dict:
+def subset_defs(paths, args) -> list[tuple[str, str, np.ndarray]]:
+    """Views of one embedding space: (key, label, indices).  Every view just selects some of the points that
+    were embedded together: random samples, the train / test split, everything."""
+    n = len(paths)
+    ns = min(args.n_samples, n)
+    first = np.sort(np.random.default_rng(args.seed).choice(n, size=ns, replace=False))
+    views = {"s1": (f"{ns:,} random images (sample 1)", first)}
+    rest = np.setdiff1d(np.arange(n), first)
+    if len(rest) >= ns // 2 and ns < n:
+        views["s2"] = (f"{min(ns, len(rest)):,} other random images (sample 2)",
+                       np.sort(np.random.default_rng(args.seed + 1).choice(rest, size=min(ns, len(rest)), replace=False)))
+    sp = splits_of(paths)
+    for name in ("train", "test"):
+        m = np.flatnonzero(sp == name)
+        if 0 < len(m) < n:
+            views[name] = (f"{name} split ({len(m):,} images)", m)
+    if ns < n:
+        views["all"] = (f"all {n:,} images", np.arange(n))
+    return [(k, *views[k]) for k in SUBSET_ORDER if k in views]
+
+
+def compute_space(repr_path: Path, args, out_dir: Path) -> dict:
+    """Everything that depends on the whole set of embeddings (PCA, UMAP, t-SNE, k-means, colour themes), computed
+    once and cached on disk.  The pages are then cheap slices of it."""
     bundle = RepresentationBundle.load(repr_path)
-    print(f"  Loaded: {bundle}  [{kind}{j or ''}]")
-    n_total = bundle.n_samples
-    idx = choose_indices(n_total, args, kind, j)
-    n = len(idx)
-    big = n > args.big_n            # large sets: parallel (unseeded) UMAP, cheaper k-means, no t-SNE
-
+    n = bundle.n_samples
+    big = n > args.big_n            # large sets: parallel (unseeded) UMAP, cheaper k-means
+    print(f"  Loaded: {bundle}")
     settings = dict(repr=repr_path.name, mtime=repr_path.stat().st_mtime, n=n, seed=args.seed,
                     variance=args.variance, n_neighbors=args.n_neighbors, min_dist=args.min_dist,
-                    perplexity=args.perplexity)
-    if kind != "default":           # keep the default set's settings (and thus its cache) unchanged
-        settings.update(kind=kind, j=j)
-    cache_name = repr_path.stem if kind == "default" else f"{repr_path.stem}__{kind}{j or ''}"
-    cache = Cache(out_dir / "cache" / cache_name, settings, args.force)
+                    perplexity=args.perplexity, tsne_embedding=args.tsne_embedding)
+    cache = Cache(out_dir / "cache" / f"{repr_path.stem}__space", settings, args.force)
 
-    X = normalize(bundle.vectors[idx].astype(np.float32), norm="l2")
-    classes = sorted(set(bundle.label_names[idx].tolist()))
-    # class index in the page = position in `classes`, regardless of the bundle's label ids
+    X = normalize(bundle.vectors.astype(np.float32), norm="l2")
+    classes = sorted(set(bundle.label_names.tolist()))
     cls_of = {c: j for j, c in enumerate(classes)}
-    lab = np.array([cls_of[c] for c in bundle.label_names[idx]])
+    lab = np.array([cls_of[c] for c in bundle.label_names])
 
-    pca = PCA(n_components=args.variance, svd_solver="full", random_state=args.seed).fit(X)
-    Z = pca.transform(X).astype(np.float32)
+    zf, evf = cache.dir / "pca_Z.npy", cache.dir / "pca_ev.npy"
+    if zf.exists() and evf.exists():
+        Z, ev = np.load(zf), np.load(evf)
+    else:
+        t0 = time.perf_counter()
+        pca = PCA(n_components=args.variance, svd_solver="full", random_state=args.seed).fit(X)
+        Z = pca.transform(X).astype(np.float32)
+        ev = pca.explained_variance_ratio_ * 100
+        np.save(zf, Z); np.save(evf, ev)
+        print(f"    pca: {time.perf_counter() - t0:.1f}s")
     n_pc = Z.shape[1]
-    print(f"  PCA: {n_pc} components explain {pca.explained_variance_ratio_.sum() * 100:.1f}% "
-          f"(of {X.shape[1]} dims)")
+    print(f"  PCA: {n_pc} components explain {ev.sum():.1f}% (of {X.shape[1]} dims)")
     spaces = {"embedding": f"embedding ({X.shape[1]}-D)", "pca": f"PCA {args.variance * 100:.0f}% ({n_pc} PCs)"}
     space_X = {"embedding": X, "pca": Z}
 
-    # projections
-    ev = pca.explained_variance_ratio_ * 100
     proj: dict[str, dict] = {}
-    for key, name, fn in [
-        ("umap_embedding", "UMAP · embedding", lambda: _umap(X, args, big)),
-        ("umap_pca", f"UMAP · PCA {args.variance * 100:.0f}%", lambda: _umap(Z, args, big)),
-        ("tsne_embedding", "t-SNE · embedding", lambda: _tsne(X, args.perplexity, args.seed)),
-        ("tsne_pca", f"t-SNE · PCA {args.variance * 100:.0f}%", lambda: _tsne(Z, args.perplexity, args.seed)),
-    ]:
-        if key.startswith("tsne") and (args.skip_tsne or n > args.tsne_max_n):
-            continue
+    todo = [("umap_embedding", "UMAP · embedding", lambda: _umap(X, args, big)),
+            ("umap_pca", f"UMAP · PCA {args.variance * 100:.0f}%", lambda: _umap(Z, args, big))]
+    if not args.skip_tsne:
+        todo.append(("tsne_pca", f"t-SNE · PCA {args.variance * 100:.0f}%", lambda: _tsne(Z, args.perplexity, args.seed)))
+        if args.tsne_embedding:
+            todo.append(("tsne_embedding", "t-SNE · embedding", lambda: _tsne(X, args.perplexity, args.seed)))
+    for key, name, fn in todo:
         proj[key] = {"name": name, "xy": cache.get(key, fn)}
     for a, b in [(0, 1), (0, 2), (1, 2)]:
         if b < n_pc:
             proj[f"pc{a + 1}{b + 1}"] = {
-                "name": f"PCA · PC{a + 1} vs PC{b + 1} ({ev[a]:.1f}% / {ev[b]:.1f}%)",
-                "xy": Z[:, [a, b]]}
+                "name": f"PCA · PC{a + 1} vs PC{b + 1} ({ev[a]:.1f}% / {ev[b]:.1f}%)", "xy": Z[:, [a, b]]}
 
-    # k-means in both spaces
-    clusters: dict[str, dict[int, np.ndarray]] = {s: {} for s in spaces}
-    metrics: dict[str, dict[int, dict]] = {s: {} for s in spaces}
-    for s, XS in space_X.items():
-        for k in args.ks:
-            if k >= n:
-                continue
-            lab_k = cache.get(f"kmeans_{s}_k{k}", lambda: _kmeans(XS, k, args.seed, 2 if big else 5)).astype(int)
-            clusters[s][k] = lab_k
-            m = cache.get(f"metrics_{s}_k{k}", lambda: np.array([
-                silhouette_score(XS, lab_k, sample_size=min(3000, n), random_state=args.seed),
-                adjusted_rand_score(lab, lab_k),
-                normalized_mutual_info_score(lab, lab_k)]))
-            metrics[s][k] = {"sil": float(m[0]), "ari": float(m[1]), "nmi": float(m[2])}
+    # k-means counts: the requested ones plus the true number of classes (the page opens on that k)
+    ks = sorted({k for k in args.ks if k < n} | {len(classes)})
+    clusters: dict[str, dict[int, np.ndarray]] = {s_: {} for s_ in spaces}
+    for sname, XS in space_X.items():
+        for k in ks:
+            clusters[sname][k] = cache.get(f"kmeans_{sname}_k{k}",
+                                           lambda: _kmeans(XS, k, args.seed, 2 if big else 5)).astype(int)
 
-    thumbs = make_thumbs(bundle.paths[idx], out_dir / "thumbs", args.thumb_size, args.workers)
-    ks = [k for k in args.ks if k < n]
-
-    years = [year_from_name(p) for p in bundle.paths[idx]]
-    n_dated = sum(y is not None for y in years)
-    print(f"  dates from file names: {n_dated} / {n}")
-
-    # dominant colours -> shared colour vocabulary -> colour-theme clusters
-    pal = load_palettes(out_dir / "thumbs", thumbs,
-                        out_dir / "cache" / f"palettes_c{args.palette_colors}.npz",
+    thumbs = make_thumbs(bundle.paths, out_dir / "thumbs", args.thumb_size, args.workers)
+    years = [year_from_name(p) for p in bundle.paths]
+    print(f"  dates from file names: {sum(y is not None for y in years)} / {n}")
+    pal = load_palettes(out_dir / "thumbs", thumbs, out_dir / "cache" / f"palettes_c{args.palette_colors}.npz",
                         args.palette_colors, args.workers)
     ref = reference_palette(pal["colors"], pal["weights"], args.palette_refs, args.seed)
     hist = palette_histograms(pal["colors"], pal["weights"], ref["centers_lab"])
     dom_ref = assign_to_reference(pal["colors"][:, :1], ref["centers_lab"])[:, 0]
     ref_hex = [_hex(c) for c in ref["rgb"]]
-    theme, theme_sw, theme_metrics = {}, {}, {}
     tag = f"c{args.palette_colors}_r{args.palette_refs}"
+    theme, theme_sw = {}, {}
     for k in ks:
         lab_t = cache.get(f"theme_{tag}_k{k}", lambda: theme_clusters(hist, k, args.seed)).astype(int)
-        theme[str(k)] = lab_t.tolist()
-        # swatches: the 4 reference colours carrying most of the cluster's pixel share
-        theme_sw[str(k)] = [
-            [ref_hex[j] for j in np.argsort(-hist[lab_t == c].mean(axis=0))[:4]] if (lab_t == c).any()
-            else ["#000000"] for c in range(k)]
-        theme_metrics[str(k)] = {"ari": float(adjusted_rand_score(lab, lab_t)),
-                                 "nmi": float(normalized_mutual_info_score(lab, lab_t))}
+        theme[k] = lab_t
+        theme_sw[str(k)] = [[ref_hex[j] for j in np.argsort(-hist[lab_t == c].mean(axis=0))[:4]] if (lab_t == c).any()
+                            else ["#000000"] for c in range(k)]
+    attr = load_attr_arrays(repr_path.stem, bundle.paths, Path(args.attr_dir))
+    nsfw = load_flags(bundle.paths)           # True = flagged as nudity: hidden by default in the page
+    if nsfw is None:
+        print("  nudity flags: NONE (run scripts/15_flag_nudity.py first) - explicit images will NOT be hidden in this page")
+    else:
+        print(f"  nudity flags: {int(nsfw.sum()):,} of {len(nsfw):,} images flagged")
+    return dict(stem=repr_path.stem, bundle=bundle, n=n, X=X, Z=Z, ev=ev, n_pc=n_pc, classes=classes, lab=lab,
+                spaces=spaces, space_X=space_X, proj=proj, ks=ks, clusters=clusters, thumbs=thumbs, years=years,
+                pal=pal, dom_ref=dom_ref, ref_hex=ref_hex, theme=theme, theme_sw=theme_sw, attr=attr, nsfw=nsfw)
+
+
+def _subset_metrics(XS, lab_k, lab, n, seed):
+    try:
+        sil = silhouette_score(XS, lab_k, sample_size=min(3000, n), random_state=seed) if len(set(lab_k.tolist())) > 1 else float("nan")
+    except Exception:
+        sil = float("nan")
+    return {"sil": float(sil), "ari": float(adjusted_rand_score(lab, lab_k)),
+            "nmi": float(normalized_mutual_info_score(lab, lab_k))}
+
+
+def shared_fields(S: dict, idx: np.ndarray) -> dict:
+    """Page fields of the images ``idx`` that do not depend on the model (the same for every representation of a
+    dataset): written once per dataset by write_meta() and left out of the pages (src/visualization/explorer.py)."""
     r = lambda a, d=3: np.round(np.asarray(a, dtype=float), d).tolist()
-    # small summary for the landing page: a preview scatter (default projection, coloured by style) and
-    # how well k-means (k = number of styles, embedding space) matches the art styles
+    pal = {f: np.asarray(v)[idx] for f, v in S["pal"].items()}
+    years = [S["years"][i] for i in idx]
+    return {
+        "lab": S["lab"][idx].tolist(),
+        "files": [Path(str(p)).name for p in S["bundle"].paths[idx]],
+        "thumbs": [f"thumbs/{S['thumbs'][i]}" for i in idx],
+        "year": years if any(y is not None for y in years) else None,
+        "pal_c": _pack(pal["colors"]).tolist(), "pal_w": r(pal["weights"], 2),
+        "light": r(pal["lightness"], 1), "chroma": r(pal["chroma"], 1),
+        "dom_ref": S["dom_ref"][idx].tolist(),
+        "theme": {str(k): v[idx].tolist() for k, v in S["theme"].items()},
+        "attrs": encode_attrs(S["attr"], idx),
+        **({"nsfw": S["nsfw"][idx].astype(int).tolist()} if S["nsfw"] is not None else {}),
+    }
+
+
+def make_page(S: dict, key: str, label: str, idx: np.ndarray, args) -> dict:
+    """A view of the shared space: the selected points only (their coordinates, clusters, colours and metadata)."""
+    bundle, n, ks = S["bundle"], len(idx), S["ks"]
+    lab, classes = S["lab"][idx], S["classes"]
+    Xs, Zs = S["X"][idx], S["Z"][idx]
+    sub_X = {"embedding": Xs, "pca": Zs}
+    r = lambda a, d=3: np.round(np.asarray(a, dtype=float), d).tolist()
+    proj = {k: {"name": v["name"], "xy": np.asarray(v["xy"])[idx]} for k, v in S["proj"].items()}
+    clusters = {sp: {k: v[idx] for k, v in d.items()} for sp, d in S["clusters"].items()}
+    metrics = {sp: {k: _subset_metrics(sub_X[sp], v, lab, n, args.seed) for k, v in d.items()}
+               for sp, d in clusters.items()}
+    theme = {str(k): v[idx] for k, v in S["theme"].items()}
+    theme_metrics = {k: {"ari": float(adjusted_rand_score(lab, v)), "nmi": float(normalized_mutual_info_score(lab, v))}
+                     for k, v in theme.items()}
     kd = min(ks, key=lambda k: abs(k - len(classes)))
     dp = "umap_pca" if "umap_pca" in proj else next(iter(proj))
     xy = np.asarray(proj[dp]["xy"], dtype=float)
     sel = np.random.default_rng(0).choice(n, size=min(900, n), replace=False)
     xy = (xy[sel] - xy.min(0)) / np.maximum(xy.max(0) - xy.min(0), 1e-9)
     mm = metrics["embedding"].get(kd, {})
-    summary = {"dim": int(bundle.dim), "n": n, "n_total": int(n_total), "n_classes": len(classes), "k": kd,
+    summary = {"dim": int(bundle.dim), "n": n, "n_total": int(S["n"]), "n_classes": len(classes), "k": kd,
                "nmi": mm.get("nmi"), "ari": mm.get("ari"), "sil": mm.get("sil"),
-               "preview": {"x": np.round(xy[:, 0], 3).tolist(), "y": np.round(xy[:, 1], 3).tolist(),
-                           "c": lab[sel].tolist()}}
+               "preview": {"x": np.round(xy[:, 0], 3).tolist(), "y": np.round(xy[:, 1], 3).tolist(), "c": lab[sel].tolist(),
+                           "colors": style_colors(classes)}}
+    nsfw = S["nsfw"]
+    if nsfw is not None:                       # flagged samples are hidden by default (see src/metadata/nudity.py)
+        summary["preview"]["f"] = nsfw[idx][sel].astype(int).tolist()
+        summary.update(nsfw_flagged=int(nsfw.sum()), nsfw_total=int(len(nsfw)))
     return {
-        "stem": repr_path.stem,
-        "kind": kind, "j": j, "page": set_page(repr_path.stem, kind, j),
-        "summary": summary,
-        "model": bundle.model_name,
+        "stem": S["stem"], "key": key, "page": set_page(S["stem"], key), "summary": summary, "model": bundle.model_name,
         "payload": {
-            "n": n,
-            "classes": classes,
-            "lab": lab.tolist(),
-            "idx": idx.tolist(),
-            "files": [Path(str(p)).name for p in bundle.paths[idx]],
-            "thumbs": [f"thumbs/{t}" for t in thumbs],
+            "n": n, "classes": classes, "idx": idx.tolist(), **shared_fields(S, idx),
             "proj": {k: {"name": v["name"], "xy": r(v["xy"])} for k, v in proj.items()},
-            "spaces": spaces,
-            "ks": ks,
-            "clusters": {s: {str(k): v.tolist() for k, v in d.items()} for s, d in clusters.items()},
-            "metrics": {s: {str(k): v for k, v in d.items()} for s, d in metrics.items()},
-            "year": years if n_dated else None,
-            "pal_c": _pack(pal["colors"]).tolist(),
-            "pal_w": r(pal["weights"], 2),
-            "light": r(pal["lightness"], 1),
-            "chroma": r(pal["chroma"], 1),
-            "dom_ref": dom_ref.tolist(),
-            "ref_colors": ref_hex,
-            "theme": theme,
-            "theme_sw": theme_sw,
-            "theme_metrics": theme_metrics,
-            "attrs": load_attrs(repr_path.stem, bundle.paths[idx], Path(args.attr_dir)),
-            "nn": neighbour_payload(X, Z, ev),
-            "default_proj": "umap_pca",
-            "default_k": min(ks, key=lambda k: abs(k - len(classes))),
-            "subtitle": f"{bundle.model_name} · {n:,} of {n_total:,} images · {len(classes)} art styles",
-            "set_label": set_label(kind, j, n),
+            "spaces": S["spaces"], "ks": ks,
+            "clusters": {sp: {str(k): v.tolist() for k, v in d.items()} for sp, d in clusters.items()},
+            "metrics": {sp: {str(k): v for k, v in d.items()} for sp, d in metrics.items()},
+            "ref_colors": S["ref_hex"], "theme_sw": S["theme_sw"], "theme_metrics": theme_metrics,
+            "nn": neighbour_payload(Xs, Zs, S["ev"]),
+            "default_proj": "umap_pca", "default_k": kd,
+            "subtitle": f"{bundle.model_name} · {n:,} of {S['n']:,} images · {len(classes)} art styles",
+            "set_label": label,
         },
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build the interactive k-means / projection explorer",
+        description="Build the interactive explorer: one embedding space per representation, shown through "
+                    "different views (random samples, train, test, everything)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--repr-dir", default="representations",
-                        help="Directory to scan for .npz representation bundles.")
+    parser.add_argument("--repr-dir", default="representations", help="Directory to scan for .npz bundles.")
     parser.add_argument("--repr", nargs="+", default=None, metavar="NPZ",
                         help="Explicit list of .npz files instead of scanning --repr-dir.")
-    parser.add_argument("--prefer-all", action="store_true",
-                        help="Use merged <dataset>_<model>_all.npz files (train + test) instead of the separate "
-                             "per-split files.")
-    parser.add_argument("--with-all", action="store_true",
-                        help="Build pages for the merged train + test files (<dataset>_<model>_all.npz, see "
-                             "scripts/merge_splits.py) in addition to the per-split pages.")
+    parser.add_argument("--per-split", action="store_true",
+                        help="Use the separate <dataset>_<model>_train / _test files instead of the merged "
+                             "<dataset>_<model>_all.npz files (scripts/merge_splits.py), which is the default.")
+    parser.add_argument("--sets", nargs="+", choices=SUBSET_ORDER, default=None,
+                        help="Which views to write (default: all that exist; links to existing pages are kept).")
     parser.add_argument("--out-dir", default="visualizations/explorer")
     parser.add_argument("--attr-dir", default="data/attributes",
                         help="Per-image attributes from scripts/09_build_attributes.py (genre, tags, CLIP concepts).")
-    parser.add_argument("--n-samples", type=int, default=10000,
-                        help="Random sample size shown in the page.")
+    parser.add_argument("--n-samples", type=int, default=10000, help="Size of the random-sample views.")
     parser.add_argument("--ks", type=int, nargs="+", default=[2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30],
                         help="Cluster counts available in the page.")
-    parser.add_argument("--variance", type=float, default=0.95,
-                        help="Fraction of variance kept for the PCA space.")
+    parser.add_argument("--variance", type=float, default=0.95, help="Fraction of variance kept for the PCA space.")
     parser.add_argument("--n-neighbors", type=int, default=15, help="UMAP n_neighbors.")
     parser.add_argument("--min-dist", type=float, default=0.1, help="UMAP min_dist.")
     parser.add_argument("--perplexity", type=float, default=30.0, help="t-SNE perplexity.")
-    parser.add_argument("--skip-tsne", action="store_true", help="Skip the (slow) t-SNE projections.")
-    parser.add_argument("--extra-sets", type=int, default=0,
-                        help="Also build this many further random samples of --n-samples images, disjoint from "
-                             "the first one and from each other (pages <stem>__set2.html, ...).")
-    parser.add_argument("--full", action="store_true",
-                        help="Also build a page showing ALL images of the dataset (<stem>__all.html). Large pages; "
-                             "t-SNE is skipped above --tsne-max-n points.")
-    parser.add_argument("--only", nargs="+", choices=["default", "extra", "full"], default=None,
-                        help="Build only these kinds of pages (links to already existing pages are kept).")
-    parser.add_argument("--skip-existing", action="store_true",
-                        help="Skip pages whose .html already exists (resume an interrupted run).")
-    parser.add_argument("--tsne-max-n", type=int, default=20000, help="Skip t-SNE for sets larger than this.")
+    parser.add_argument("--skip-tsne", action="store_true", help="Skip the (slow) t-SNE projection.")
+    parser.add_argument("--tsne-embedding", action="store_true",
+                        help="Also run t-SNE on the raw embedding (by default only on the PCA space: much faster).")
+    parser.add_argument("--skip-existing", action="store_true", help="Skip representations whose pages all exist.")
     parser.add_argument("--big-n", type=int, default=20000,
                         help="Above this many points UMAP runs unseeded (parallel) and k-means uses fewer restarts.")
     parser.add_argument("--thumb-size", type=int, default=192, help="Thumbnail max side in px.")
     parser.add_argument("--workers", type=int, default=16, help="Threads for thumbnail creation.")
-    parser.add_argument("--palette-colors", type=int, default=5,
-                        help="Dominant colours extracted per painting.")
+    parser.add_argument("--palette-colors", type=int, default=5, help="Dominant colours extracted per painting.")
     parser.add_argument("--palette-refs", type=int, default=16,
                         help="Size of the shared colour vocabulary used for colour themes.")
     parser.add_argument("--seed", type=int, default=42)
@@ -494,81 +534,62 @@ def main() -> None:
     if args.repr:
         repr_paths = [Path(p) for p in args.repr]
     else:
-        repr_paths = _find_representations(Path(args.repr_dir), args.prefer_all, args.with_all)
+        repr_paths = _find_representations(Path(args.repr_dir), prefer_all=not args.per_split)
         if not repr_paths:
             print(f"No representation .npz files found in {args.repr_dir}.")
             return
     out_dir = Path(args.out_dir)
     args.ks = sorted(set(args.ks))
-
-    want = set(args.only) if args.only else {"default", "extra", "full"}
-
-    def n_in(path: Path) -> int:
-        return int(np.load(path, allow_pickle=False)["labels"].shape[0])
-
-    def declared_sets(n_tot: int) -> list[tuple[str, int]]:
-        """Pages that make sense for a bundle of n_tot images: further samples only while enough images are left,
-        the full page only if it differs from the default sample (so the small test splits get one page)."""
-        out = [("default", 0)]
-        out += [("extra", t) for t in range(args.extra_sets)
-                if n_tot - args.n_samples * (t + 1) >= args.n_samples // 2]
-        if args.full and n_tot > args.n_samples:
-            out.append(("full", 0))
-        return out
-
-    declared = {r.stem: declared_sets(n_in(r)) for r in repr_paths}
+    want = set(args.sets) if args.sets else set(SUBSET_ORDER)
     by_stem = {r.stem: r for r in repr_paths}
+    views = {r.stem: subset_defs(np.load(r, allow_pickle=False)["paths"], args) for r in repr_paths}
 
-    def group_of(stem: str) -> str:      # dataset + split, e.g. "artbench_train": models are compared within a group
+    def group_of(stem: str) -> str:          # dataset + split-kind, e.g. "artbench_all": models are compared within it
         return f"{stem.split('_')[0]}_{stem.rsplit('_', 1)[-1]}"
 
     def finalize(b: dict) -> None:
-        """Write one page right after it is built (so a job that hits its time limit keeps what it finished)."""
-        pl = b["payload"]
-        pl["siblings"] = [{"name": o, "href": set_page(o, b["kind"], b["j"]), "current": o == b["stem"]}
-                          for o in by_stem if group_of(o) == group_of(b["stem"]) and (b["kind"], b["j"]) in declared[o]]
-        n_tot = n_in(by_stem[b["stem"]])
-        pl["sets"] = []
-        for kind, t in declared[b["stem"]]:
-            n_set = n_tot if kind == "full" else min(args.n_samples, n_tot)
-            page = set_page(b["stem"], kind, t)
-            pl["sets"].append({"label": set_label(kind, t, n_set), "href": page, "current": page == b["page"]})
+        """Write one page right after it is built (a job that hits its time limit keeps what it finished)."""
+        pl, stem = b["payload"], b["stem"]
+        pl["siblings"] = [{"name": o, "href": set_page(o, b["key"]), "current": o == stem} for o in by_stem
+                          if group_of(o) == group_of(stem) and b["key"] in [k for k, *_ in views[o]]]
+        pl["sets"] = [{"label": lb, "href": set_page(stem, k), "current": k == b["key"]} for k, lb, _ in views[stem]]
         b["sets_links"] = pl["sets"]
-        p = write_explorer(out_dir / b["page"], pl, f"Explorer · {b['stem']}")
+        p = write_explorer(out_dir / b["page"], pl, f"Explorer · {stem}", meta=b["meta"])
         print(f"Explorer written -> {p}")
-        if b["kind"] == "default":       # what the landing page needs, kept next to the cache
+        if b["key"] == "s1":                 # what the landing page needs
             groups: dict[str, list] = {}
             for a in pl.get("attrs", []):
                 groups.setdefault(a["group"], []).append(a["label"])
-            (out_dir / "cache" / b["stem"] / "landing.json").write_text(json.dumps(
-                {"stem": b["stem"], "summary": b["summary"], "sets_links": b["sets_links"], "attr_groups": groups}))
+            (out_dir / "cache" / f"{stem}__space" / "landing.json").write_text(json.dumps(
+                {"stem": stem, "summary": b["summary"], "sets_links": b["sets_links"], "attr_groups": groups}))
 
     def write_landing() -> None:
-        entries = []
-        for stem in by_stem:
-            f = out_dir / "cache" / stem / "landing.json"
-            if f.exists() and (out_dir / set_page(stem, "default")).exists():
+        entries = []                         # every representation that has a page, not only those of this run
+        for f in sorted((out_dir / "cache").glob("*__space/landing.json")):
+            stem = f.parent.name.removesuffix("__space")
+            if (out_dir / set_page(stem, "s1")).exists():
                 entries.append(json.loads(f.read_text()))
         if entries:
-            idx = write_index(out_dir / "index.html", entries, args.n_samples)
-            print(f"Landing page written -> {idx}")
+            print(f"Landing page written -> {write_index(out_dir / 'index.html', entries, args.n_samples)}")
 
     for repr_path in repr_paths:
-        for kind, t in declared[repr_path.stem]:
-            if kind not in want:
-                continue
-            done = (out_dir / set_page(repr_path.stem, kind, t)).exists() and (
-                kind != "default" or (out_dir / "cache" / repr_path.stem / "landing.json").exists())
-            if args.skip_existing and done:                    # (a default page without landing.json is from an older build)
-                print(f"── {repr_path.stem}  [{kind}{t or ''}]  already built, skipped")
-                continue
-            print(f"\n── {repr_path.stem}  [{kind}{t or ''}] ──")
-            b = build(repr_path, args, out_dir, kind, t)
-            finalize(b)
+        stem = repr_path.stem
+        todo = [(k, lb, ix) for k, lb, ix in views[stem] if k in want]
+        if args.skip_existing and todo and all((out_dir / set_page(stem, k)).exists() for k, _, _ in todo) \
+                and (out_dir / "cache" / f"{stem}__space" / "landing.json").exists():
+            print(f"── {stem}: all pages already built, skipped")
+            continue
+        print(f"\n── {stem} ──")
+        S = compute_space(repr_path, args, out_dir)
+        meta = write_meta(out_dir, group_of(stem), shared_fields(S, np.arange(S["n"])))   # shared by all its pages
+        for k, lb, ix in todo:
+            t0 = time.perf_counter()
+            finalize({**make_page(S, k, lb, ix, args), "meta": meta})
+            print(f"    page '{k}' ({len(ix):,} images): {time.perf_counter() - t0:.0f}s")
             write_landing()
+        del S
     write_landing()
-    print(f"\nCopy {out_dir}/ (pages + thumbs/) to a laptop to view, e.g.\n"
-          f"  scp -r <jureca>:{out_dir.resolve()} .")
+    print(f"\nOpen {out_dir}/index.html through a web server, e.g.  python -m http.server --directory {out_dir}")
 
 
 if __name__ == "__main__":

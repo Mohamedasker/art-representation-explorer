@@ -151,6 +151,9 @@ def main() -> None:
             arrays["hist_entropy"] = (-(shares * np.log2(p)).sum(1)).astype(np.float32)
             print("  dominant hue family: " + ", ".join(f"{n}={int((dom == j).sum())}" for j, n in enumerate(P.HUE_NAMES)))
 
+        dup = sorted({d["key"] for d in defs if sum(e["key"] == d["key"] for e in defs) > 1})
+        if dup:                              # a repeated key silently overwrites the earlier attribute's values
+            raise SystemExit(f"duplicate attribute keys: {dup}")
         out = REPO_ROOT / args.out_dir / f"{ds}_{split}.npz"
         A.save_attributes(out, paths, defs, arrays)
         print(f"  wrote {out}  ({len(defs)} attributes)")

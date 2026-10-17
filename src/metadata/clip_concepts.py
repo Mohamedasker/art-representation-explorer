@@ -85,7 +85,7 @@ GROUPS: dict[str, tuple[str, str, dict[str, str | list[str]], list[str] | None]]
     "clip_colormode": ("CLIP: colour mode", TECH, {
         "colourful": "a colourful painting", "black & white": "a black and white image",
         "sepia / one colour": "a sepia or monochrome image"}, None),
-    "clip_frame": ("CLIP: frame", TECH, {
+    "clip_framed": ("CLIP: frame", TECH, {   # not "clip_frame": that is the "frame" concept score above
         "framed": "a painting in an ornate golden frame", "no frame": "a painting filling the whole image with no frame"}, None),
 }
 
@@ -150,8 +150,34 @@ def _encode_text(texts: list[str], model_name: str, pretrained: str, device: str
     return np.concatenate(out)
 
 
-def text_embeddings(model_name: str = "ViT-B-32", pretrained: str = "openai"):
-    """Returns (concept[C,D], null[D], groups{key:(rows, class_of_row)}, pairs[P,2,D]) — all L2-normalised."""
+DEFAULT_TEXT_CACHE = "data/attributes/clip_text_embeddings_vitb32_openai.npz"
+
+
+def _cached_text_encoding(texts, model_name, pretrained, cache) -> np.ndarray:
+    """Text embeddings of ``texts``, read from the saved file when it matches (same model, same prompts), so CLIP
+    itself is only loaded when the prompts change.  The file is the saved set of text embeddings: scoring images
+    is then a matrix product with them (see :func:`score`)."""
+    import hashlib
+    from pathlib import Path
+    sig = hashlib.sha1(("\n".join(texts) + f"|{model_name}|{pretrained}").encode()).hexdigest()
+    path = Path(cache) if cache else None
+    if path is not None and path.exists():
+        z = np.load(path, allow_pickle=False)
+        if str(z["signature"]) == sig:
+            return z["emb"]
+    emb = _encode_text(texts, model_name, pretrained)
+    if path is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.stem + ".tmp.npz")
+        np.savez_compressed(tmp, emb=emb.astype(np.float32), texts=np.array(texts, dtype=str), signature=sig,
+                            model=model_name, pretrained=pretrained)
+        tmp.replace(path)
+    return emb
+
+
+def text_embeddings(model_name: str = "ViT-B-32", pretrained: str = "openai", cache: str | None = DEFAULT_TEXT_CACHE):
+    """Returns (concept[C,D], null[D], groups{key:(rows, class_of_row)}, pairs[P,2,D]) — all L2-normalised.
+    ``cache``: where the raw text embeddings are saved (None = do not cache)."""
     texts, spans = [], {}
 
     def add(key, phrases, templates=TEMPLATES):
@@ -173,7 +199,7 @@ def text_embeddings(model_name: str = "ViT-B-32", pretrained: str = "openai"):
     for k, (_, _, pos, neg) in PAIRS.items():
         add(f"pair/{k}/pos", pos, templates=None)
         add(f"pair/{k}/neg", neg, templates=None)
-    emb = _encode_text(texts, model_name, pretrained)
+    emb = _cached_text_encoding(texts, model_name, pretrained, cache)
 
     def mean(key):
         a, b = spans[key]

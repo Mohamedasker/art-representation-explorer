@@ -10,6 +10,24 @@ import json
 from pathlib import Path
 
 # order shown on the page; (substring of the stem, short label, family, description)
+def _simclr_info() -> list:
+    """Overview entries for the SimCLR models: frozen ImageNet weights + one per (training dataset, augmentation set)
+    from configs/aug_sets.yaml (specific keys; matching is by substring of the page stem)."""
+    import yaml
+    out = [("simclr_imagenet", "SimCLR ResNet-50 (ImageNet)", "Self-supervised, contrastive · off-the-shelf",
+            "Published ImageNet-1k SimCLR v1 ResNet-50 (1x), frozen. Global-pooled encoder output, 2048-D; never trained on art.")]
+    try:
+        sets = yaml.safe_load((Path(__file__).resolve().parents[2] / "configs" / "aug_sets.yaml").read_text())
+    except OSError:
+        return out
+    for ds, dname in (("artbench", "ArtBench"), ("wikiart", "WikiArt")):
+        for aug, spec in sets.items():
+            out.append((f"simclr_{ds}_{aug}", f"SimCLR · {dname} · {aug}", "Self-supervised, contrastive · in-domain",
+                        f"ResNet-50 SimCLR trained from scratch on {dname} train only, augmentation set '{aug}': "
+                        f"{spec['description']}. {spec['intent']} 2048-D pooled encoder output."))
+    return out
+
+
 MODEL_INFO = [
     ("cnn_supervised", "ResNet-50 (trained here)", "Supervised, in-domain",
      "Trained from scratch on ArtBench + WikiArt to predict style, genre and artist (multi-task)."),
@@ -18,6 +36,19 @@ MODEL_INFO = [
     ("autoencoder", "Convolutional autoencoder", "Unsupervised",
      "Trained only to reconstruct the images (ArtBench + WikiArt). Latent code, pooled to 1024-D. "
      "Captures colour, layout and texture; no labels involved."),
+    ("mae_imagenet", "MAE ViT-B/16 (ImageNet)", "Masked autoencoder, off-the-shelf",
+     "Meta's ImageNet-1k masked autoencoder, frozen. Mean of the encoder's patch tokens on the unmasked image, 768-D."),
+    ("mae_adapt_artbench", "MAE · adapted on ArtBench", "Masked autoencoder, in-domain",
+     "ImageNet MAE, pre-training continued with the masked-patch objective on ArtBench-10 train only. "
+     "Same 768-D mean patch-token embedding."),
+    ("mae_adapt_wikiart", "MAE · adapted on WikiArt", "Masked autoencoder, in-domain",
+     "ImageNet MAE, pre-training continued with the masked-patch objective on WikiArt train only. "
+     "Same 768-D mean patch-token embedding."),
+    ("mae_scratch_artbench", "MAE · from scratch on ArtBench", "Masked autoencoder, in-domain",
+     "Randomly initialised MAE ViT-B/16 trained with the masked-patch objective on ArtBench-10 train only."),
+    ("mae_scratch_wikiart", "MAE · from scratch on WikiArt", "Masked autoencoder, in-domain",
+     "Randomly initialised MAE ViT-B/16 trained with the masked-patch objective on WikiArt train only."),
+    *_simclr_info(),
     ("dinov2", "DINOv2 ViT-B/14", "Self-supervised",
      "Pretrained with self-distillation on large image collections; no labels and no text."),
     ("clip", "CLIP ViT-B/32", "Language-supervised",
@@ -25,8 +56,8 @@ MODEL_INFO = [
 ]
 DATASETS = {"artbench_train": ("ArtBench-10 · train", "50,000 paintings · 10 styles"),
             "artbench_test": ("ArtBench-10 · test", "10,000 held-out paintings"),
-            "artbench_all": ("ArtBench-10 · train + test", "60,000 paintings together, coloured by split"),
-            "wikiart_all": ("WikiArt · train + test", "81,444 paintings together, coloured by split"),
+            "artbench_all": ("ArtBench-10", "60,000 paintings · train + test in one embedding space · 10 styles"),
+            "wikiart_all": ("WikiArt", "81,444 paintings · train + test in one embedding space · 27 styles"),
             "wikiart_train": ("WikiArt · train", "73,143 paintings · 27 styles · genre and artist labels"),
             "wikiart_test": ("WikiArt · test", "8,301 held-out paintings")}
 
@@ -46,9 +77,22 @@ header.hero { padding:56px 0 28px; }
 .hero h1 span { background:linear-gradient(90deg,var(--accent),#ff7a7a 60%,var(--accent2)); -webkit-background-clip:text;
        background-clip:text; color:transparent; }
 .hero p { margin:0; max-width:780px; color:var(--muted); font-size:16px; }
+.explbox { display:flex; gap:12px; align-items:flex-start; margin-top:18px; padding:12px 16px; max-width:780px; cursor:pointer;
+          background:var(--panel); border:1px solid var(--line); border-radius:12px; }
+.explbox input { margin-top:4px; transform:scale(1.25); }
+.explbox b { display:block; color:var(--fg); font-size:14px; }
+.explbox span { color:var(--muted); font-size:12.5px; line-height:1.45; display:block; }
+.explbox.on { border-color:#ffb454; }
 .stats { display:flex; flex-wrap:wrap; gap:10px; margin-top:22px; }
 .stat { background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:6px 14px; font-size:13px;
         color:var(--muted); } .stat b { color:var(--fg); font-weight:600; }
+.viewers { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; margin:6px 0 10px; }
+a.vcard { display:block; text-decoration:none; color:inherit; background:linear-gradient(135deg,#1b2233,#17191e 60%); border:1px solid var(--line);
+          border-radius:16px; padding:22px 24px; transition:transform .15s, border-color .15s, box-shadow .15s; }
+a.vcard:hover { transform:translateY(-3px); border-color:var(--accent); box-shadow:0 10px 30px #0008; }
+a.vcard small { color:var(--accent); font-size:11px; letter-spacing:.08em; text-transform:uppercase; }
+a.vcard h3 { margin:6px 0 8px; font-size:22px; } a.vcard p { margin:0 0 14px; color:var(--muted); font-size:14px; }
+a.vcard span { color:var(--accent); font-size:13px; }
 .tabs { display:flex; gap:8px; margin:34px 0 18px; }
 .tab { cursor:pointer; background:var(--panel); border:1px solid var(--line); color:var(--muted); border-radius:10px;
        padding:9px 16px; font-size:14px; } .tab small { display:block; font-size:11px; opacity:.8; }
@@ -93,7 +137,21 @@ footer { margin-top:48px; color:var(--muted); font-size:12.5px; }
      label-supervised models. Open a card for an interactive map (UMAP, t-SNE, PCA) that you can colour by cluster, art style,
      colour, painting date, metadata and CLIP-derived content, mood and aesthetics.</p>
   <div class="stats" id="stats"></div>
+  <label class="explbox" id="explbox"><input type="checkbox" id="showexpl">
+    <div><b>Show explicit images</b>
+    <span id="expltext">Paintings that contain nudity are flagged automatically and are hidden by default: they are not drawn in the maps
+      and their images are never loaded. Tick this to include the full, unfiltered dataset in every map (the choice is remembered
+      in this browser and applies to all explorer pages).</span></div></label>
 </header>
+<section class="viewers" style="margin-top:0">
+  <a class="vcard" href="#explorer"><small>viewer 1</small><h3>Embedding explorer</h3>
+    <p>Interactive 2D maps (UMAP, t-SNE, PCA) of the image embeddings of five models. Colour by cluster, art style, metadata
+       and CLIP-derived content; select regions, inspect neighbours, interpolate between paintings.</p><span>Choose a model below &darr;</span></a>
+  <a class="vcard" href="featuremaps/index.html"><small>viewer 2</small><h3>Feature-map viewer</h3>
+    <p>Look inside the networks: the channel activations, principal-component colour maps and activation / attention overlays of the
+       trained ResNet-50, the ImageNet ResNet-50, the autoencoder, DINOv2 and CLIP, layer by layer, for a painting of your choice.</p><span>Open the feature-map viewer &rarr;</span></a>
+</section>
+<div id="explorer"></div>
 <div class="tabs" id="tabs"></div>
 <div class="grid" id="grid"></div>
 <section><h2>How do the embeddings compare?</h2>
@@ -113,6 +171,26 @@ const PAL = ["#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd","#8c564b","#e377c
   "#aec7e8","#ffbb78","#98df8a","#ff9896","#c5b0d5","#c49c94","#f7b6d2","#c7c7c7","#dbdb8d","#9edae5"];
 const col = i => PAL[i % PAL.length];
 const fmt = (x, d = 3) => x === null || x === undefined ? "–" : x.toFixed(d);
+
+// explicit images: flagged samples are hidden unless ticked; the same key is read by every explorer page
+const EXPL_KEY = "artExplorer.showExplicit";
+let showExplicit = false;
+try { showExplicit = localStorage.getItem(EXPL_KEY) === "1"; } catch (e) {}
+(function () {
+  const tot = {};                                    // flagged / total per dataset family (from the full embeddings)
+  for (const e of D.entries) { const f = e.dataset.split("_")[0];
+    if (e.nsfw_total && !(f in tot)) tot[f] = [e.nsfw_flagged, e.nsfw_total]; }
+  const names = { artbench: "ArtBench-10", wikiart: "WikiArt" };
+  const parts = Object.entries(tot).map(([f, [a, b]]) => `${names[f] || f}: ${a.toLocaleString()} of ${b.toLocaleString()} images flagged (${(100 * a / b).toFixed(1)}%)`);
+  if (parts.length) $("expltext").innerHTML += `<br><b style="display:inline;color:var(--accent)">${parts.join(" &middot; ")}</b>`;
+  $("showexpl").checked = showExplicit; $("explbox").classList.toggle("on", showExplicit);
+  const set = v => { showExplicit = v; $("showexpl").checked = v; $("explbox").classList.toggle("on", v);
+    document.querySelectorAll("canvas.prev").forEach(drawPreview); };
+  $("showexpl").addEventListener("change", () => {
+    try { localStorage.setItem(EXPL_KEY, $("showexpl").checked ? "1" : "0"); } catch (e) {}
+    set($("showexpl").checked); });
+  addEventListener("storage", e => { if (e.key === EXPL_KEY) set(e.newValue === "1"); });
+})();
 
 $("stats").innerHTML = D.stats.map(s => `<span class="stat"><b>${s[0]}</b> ${s[1]}</span>`).join("");
 let current = D.datasets[0].key;
@@ -140,7 +218,8 @@ function drawPreview(cv) {
   const pad = 14, P = e.preview;
   g.globalAlpha = .85;
   for (let i = 0; i < P.x.length; i++) {
-    g.fillStyle = col(P.c[i]); g.beginPath();
+    if (P.f && P.f[i] && !showExplicit) continue;
+    g.fillStyle = P.colors ? P.colors[P.c[i]] : col(P.c[i]); g.beginPath();
     g.arc(pad + P.x[i] * (w - 2 * pad), pad + (1 - P.y[i]) * (h - 2 * pad), 2.1, 0, 6.3); g.fill();
   }
 }

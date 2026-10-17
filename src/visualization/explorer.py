@@ -7,13 +7,17 @@ art style and cluster membership; clicking pins it.  Dropdowns switch between
 projections, k-means cluster counts and cluster spaces, and the colouring.
 
 The page is plain HTML + canvas + vanilla JS (no CDN), so it works offline.
-Keep it next to the ``thumbs/`` folder it references.
+Keep it next to the ``thumbs/`` and ``meta/`` folders it references.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 from pathlib import Path
+
+import numpy as np
 
 HTML_TEMPLATE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -40,6 +44,8 @@ main { display:grid; grid-template-columns:minmax(0,1fr) 12px var(--side, 360px)
                 border-radius:2px; background:var(--line); transition:background .15s, height .15s; }
 #split:hover::after, #split.drag::after { background:#8a8a8a; height:96px; }
 body.resizing { user-select:none; cursor:col-resize; }
+.expl { color:#ffb74d; font-size:12px; cursor:pointer; white-space:nowrap; } .expl input { vertical-align:middle; }
+.expl span { color:var(--muted); }
 #mapwrap { position:relative; background:var(--panel); border:1px solid var(--line);
            border-radius:6px; min-height:300px; }
 #map { width:100%; height:100%; display:block; cursor:crosshair; }
@@ -106,7 +112,8 @@ button:hover { border-color:#666; }
   <span><label>Cluster space </label><select id="spacesel"></select></span>
   <span><label>k </label><select id="ksel"></select></span>
   <span><label>Colour by </label><select id="colorsel">
-    <option value="cluster">embedding k-means cluster</option><option value="style">art style</option>
+    <option value="cluster_style">k-means cluster (coloured by its dominant art style)</option>
+    <option value="cluster">k-means cluster (distinct colours)</option><option value="style">art style</option>
     <option value="theme">colour theme (k-means on palettes)</option>
     <option value="dominant">dominant colour (actual)</option>
     <option value="dominant_ref">dominant colour (shared palette)</option>
@@ -123,6 +130,7 @@ button:hover { border-color:#666; }
     <button id="swapab">swap A/B</button><button id="clearab">reset</button></span>
   <span><label>Size </label><input id="size" type="range" min="1" max="8" step="0.5" value="3"></span>
   <span class="sub" id="metrics"></span>
+  <label id="explwrap" class="expl" hidden title="Images flagged as containing nudity are hidden unless this is ticked. The choice is shared by all explorer pages and remembered by the browser."><input type="checkbox" id="showexpl"> show explicit images <span id="explcount"></span></label>
 </header>
 <main>
   <div id="mapwrap"><canvas id="map"></canvas><div id="legend"></div><div id="tools"><button data-tool="pan" class="on" title="inspect / pan (V)">Pan</button>
@@ -154,8 +162,36 @@ button:hover { border-color:#666; }
     <div class="card"><h2 id="comptitle">Art styles in this cluster</h2><div id="comp"></div></div>
   </aside>
 </main>
+__META_SCRIPT__<script>
+// Per-image data that is the same for every model of a dataset (labels, thumbnails, palettes, attributes, ...) lives
+// once in meta/<name>.js, loaded above and cached by the browser across pages.  The page keeps its sample indices
+// (D.idx) and selects its rows from it here.
+function hydrate(d) {
+  if (!d.meta) return d;
+  const M = window.EXPLORER_META;
+  if (!M || M.name !== d.meta) {
+    document.body.insertAdjacentHTML("afterbegin", `<p style="padding:16px;color:#f88">Could not load ` +
+      `meta/${d.meta}.js: keep the meta/ folder next to this page.</p>`);
+    throw new Error("missing meta/" + d.meta + ".js");
+  }
+  const ix = d.idx, pick = a => ix.map(i => a[i]);
+  for (const k of d.meta_keys) {
+    if (k === "theme") { d.theme = {}; for (const kk in M.theme) d.theme[kk] = pick(M.theme[kk]); }
+    else d[k] = pick(M[k]);
+  }
+  for (const a of d.attrs || []) {                  // same encoding as the inline a.b64 (see the attribute decoder)
+    if (!a.meta) continue;
+    const m = M.attrs[a.key], bin = atob(m.b64), u = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    if (m.kind === "num") { const q = new Uint16Array(u.buffer), span = (m.hi - m.lo) || 1;
+      a.v = ix.map(i => q[i] === 65535 ? null : m.lo + q[i] / 65534 * span); }
+    else { const q = m.kind === "color" ? new Int32Array(u.buffer) : new Int16Array(u.buffer); a.v = ix.map(i => q[i]); }
+  }
+  return d;
+}
+</script>
 <script>
-const D = __DATA__;
+const D = hydrate(__DATA__);
 const N = D.n, NC = D.classes.length;
 const TAB20 = ["#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd","#8c564b","#e377c2","#7f7f7f",
   "#bcbd22","#17becf","#aec7e8","#ffbb78","#98df8a","#ff9896","#c5b0d5","#c49c94","#f7b6d2",
@@ -165,8 +201,52 @@ function palette(k) {
   if (k <= 20) return TAB20.slice(0, k);
   return Array.from({ length: k }, (_, i) => `hsl(${(i * 360 / k) | 0},70%,55%)`);
 }
-const STYLE_PAL = palette(NC);
+const STYLE_PAL = (D.style_colors && D.style_colors.length === NC) ? D.style_colors : palette(NC);  // fixed colour per style
+const STYLE_YEAR = D.style_years || [];
+const STYLE_ORDER = [...Array(NC).keys()].sort((a, b) => (STYLE_YEAR[a] ?? 9999) - (STYLE_YEAR[b] ?? 9999) || a - b);
+
+// colour helpers for the shaded cluster colours
+function hexToHsl(h) {
+  const r = parseInt(h.slice(1, 3), 16) / 255, g = parseInt(h.slice(3, 5), 16) / 255, b = parseInt(h.slice(5, 7), 16) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2; let hh = 0, s = 0;
+  if (mx !== mn) { const d = mx - mn; s = l > .5 ? d / (2 - mx - mn) : d / (mx + mn);
+    hh = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; hh *= 60; }
+  return [hh, s, l];
+}
+function hslCss(h, s, l) { return `hsl(${((h % 360) + 360) % 360},${(s * 100).toFixed(0)}%,${(l * 100).toFixed(0)}%)`; }
+// colours of k clusters: each takes the colour of its dominant art style; clusters sharing a dominant style become
+// lighter / darker shades of that colour (largest cluster keeps the base colour)
+function clusterStyleColors(lab, k) {
+  const cnt = Array(k).fill(0), st = Array.from({ length: k }, () => Array(NC).fill(0));
+  lab.forEach((l, i) => { cnt[l]++; st[l][D.lab[i]]++; });
+  const dom = st.map(row => row.indexOf(Math.max(...row))), byStyle = {};
+  dom.forEach((d, c) => { (byStyle[d] = byStyle[d] || []).push(c); });
+  const colors = Array(k);
+  for (const [d, cs] of Object.entries(byStyle)) {
+    cs.sort((a, b) => cnt[b] - cnt[a]);
+    const [h, s, l0] = hexToHsl(STYLE_PAL[+d]), m = cs.length;
+    const dir = l0 > 0.55 ? -1 : 1, step = Math.min(0.17, 0.42 / Math.max(1, m - 1));   // shade towards the side with room
+    cs.forEach((c, t) => {
+      if (t === 0) { colors[c] = STYLE_PAL[+d]; return; }                     // the largest cluster keeps the base colour
+      colors[c] = hslCss(h + 4 * t * dir, Math.min(1, s * (1 + 0.04 * t)), Math.max(0.2, Math.min(0.88, l0 + dir * step * t)));
+    });
+  }
+  return { colors, dom, cnt, st };
+}
 const $ = id => document.getElementById(id);
+
+// ── explicit images: flagged samples (D.nsfw = 1) are hidden unless "show explicit images" is ticked ──
+// The tick is stored under one key, so the overview page and every explorer page share it; the default is hidden.
+// Hidden samples are not drawn, cannot be hovered, selected or listed, and their image file is never requested.
+const NSFW = D.nsfw || null;
+const EXPL_KEY = "artExplorer.showExplicit";
+let showExplicit = false;
+try { showExplicit = localStorage.getItem(EXPL_KEY) === "1"; } catch (e) {}
+const hidden = i => NSFW !== null && !showExplicit && NSFW[i] === 1;
+const HIDDEN_IMG = "data:image/svg+xml;utf8," + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" fill="#222"/>' +
+  '<text x="80" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#888">hidden</text></svg>');
+const thumb = i => hidden(i) ? HIDDEN_IMG : D.thumbs[i];
 
 // ── controls ──
 const projsel = $("projsel"), spacesel = $("spacesel"), ksel = $("ksel"), colorsel = $("colorsel");
@@ -320,7 +400,8 @@ function scheme() {
   if (cs === "style") {
     const cnt = Array(NC).fill(0); D.lab.forEach(l => cnt[l]++);
     return { id: i => D.lab[i], color: i => STYLE_PAL[D.lab[i]],
-      legend: D.classes.map((c, j) => [STYLE_PAL[j], `${c}  (n=${cnt[j]})`, j]) };
+      legend: STYLE_ORDER.filter(j => cnt[j] > 0).map(j =>
+        [STYLE_PAL[j], `${D.classes[j]}${STYLE_YEAR[j] ? " (~" + STYLE_YEAR[j] + ")" : ""}  n=${cnt[j]}`, j]) };
   }
   if (cs === "dominant")       // each point drawn in its painting's most dominant colour
     return { id: () => 0, fixed: true, color: i => hex(D.pal_c[i][0]), legend: [] };
@@ -344,6 +425,12 @@ function scheme() {
     return { id: i => lab[i], color: i => pal[lab[i]][0],
       legend: cnt.map((n, c) => [pal[c][0], `${c} ${chips(pal[c])} n=${n}`, c]) };
   }
+  if (cs === "cluster_style") {
+    const k = curK(), lab = curLab(), { colors, dom, cnt, st } = clusterStyleColors(lab, k);
+    const order = [...Array(k).keys()].sort((a, b) => (STYLE_YEAR[dom[a]] ?? 9999) - (STYLE_YEAR[dom[b]] ?? 9999) || cnt[b] - cnt[a]);
+    return { id: i => lab[i], color: i => colors[lab[i]],
+      legend: order.map(c => [colors[c], `${c}  n=${cnt[c]} · ${Math.round(100 * st[c][dom[c]] / cnt[c])}% ${D.classes[dom[c]]}`, c]) };
+  }
   const k = curK(), lab = curLab(), pal = palette(k);
   const cnt = Array(k).fill(0), st = Array.from({ length: k }, () => Array(NC).fill(0));
   lab.forEach((l, i) => { cnt[l]++; st[l][D.lab[i]]++; });
@@ -358,14 +445,16 @@ function tag(i, text, color) {
   return `<span class="tag" style="background:${color}">${text}</span>`;
 }
 function figure(i, caption, tagHtml, attr) {
-  return `<figure data-i="${i}" ${attr || ""}><img src="${D.thumbs[i]}" loading="lazy">${tagHtml || ""}
+  return `<figure data-i="${i}" ${attr || ""}><img src="${thumb(i)}" loading="lazy">${tagHtml || ""}
     <figcaption>${caption}</figcaption></figure>`;
 }
 function computeKnn() {
   const K = +$("kk").value; $("kkv").textContent = K;
   if (qpt < 0) { ov = null; return; }
   const ids = [], sims = [];
-  for (let r = 0; r < K; r++) { ids.push(KNN_IDX[qpt * NN.K + r]); sims.push(SIMILARITY(qpt, r)); }
+  for (let r = 0; r < NN.K && ids.length < K; r++) {            // flagged neighbours are skipped while explicit images are hidden
+    const j = KNN_IDX[qpt * NN.K + r]; if (hidden(j)) continue;
+    ids.push(j); sims.push(SIMILARITY(qpt, r)); }
   ov = { kind: "knn", q: qpt, ids, sims };
   const same = ids.filter(j => D.lab[j] === D.lab[qpt]).length;
   $("modetitle").textContent = "Nearest neighbours";
@@ -392,7 +481,7 @@ function computeInterp() {
     for (let d = 0; d < P; d++) v[d] = (1 - t) * a[d] + t * b[d];
     let best = -1, bd = 1e30;
     for (let i = 0; i < N; i++) {
-      if (used.has(i)) continue;
+      if (used.has(i) || hidden(i)) continue;
       let dist = 0, o = i * P;
       for (let d = 0; d < P; d++) { const x = PCS[o + d] * sc - v[d]; dist += x * x; if (dist >= bd) break; }
       if (dist < bd) { bd = dist; best = i; }
@@ -469,6 +558,7 @@ function draw() {
   for (let pass = 0; pass < 2; pass++) {       // dimmed (not isolated / not selected) first, then the rest on top
     g.globalAlpha = !active ? (cur >= 0 ? 0.55 : 0.8) : (pass === 0 ? 0.07 : 0.9);
     for (let i = 0; i < N; i++) {
+      if (hidden(i)) continue;
       const on = (isolate === null || sc.id(i) === isolate) && (!selOn || selFlag[i] === 1);
       if (active && on !== (pass === 1)) continue;
       if (!active && pass === 1) continue;
@@ -504,7 +594,11 @@ function draw() {
 function show(i) {
   $("pin").textContent = pinned >= 0 ? "· pinned (click to release)" : "";
   if (i < 0) return;
-  $("thumb").src = D.thumbs[i];
+  if (hidden(i)) {          // flagged and explicit images are hidden: no image, no title, no metadata
+    $("thumb").src = HIDDEN_IMG; $("palette").innerHTML = ""; $("comp").innerHTML = "";
+    $("info").innerHTML = `<div><dt>sample</dt><dd>hidden (flagged as explicit)</dd></div>`; return;
+  }
+  $("thumb").src = thumb(i);
   const k = curK(), rows = [["sample", `${i}  (file ${D.idx[i]})`], ["file", D.files[i]],
     ["art style", D.classes[D.lab[i]]]];
   for (const [key, name] of Object.entries(D.spaces))
@@ -541,6 +635,7 @@ function show(i) {
 function nearest(mx, my) {
   const xy = curProj(), sc = scheme(); let best = -1, bd = 144;
   for (let i = 0; i < N; i++) {
+    if (hidden(i)) continue;
     if (isolate !== null && sc.id(i) !== isolate) continue;
     if (selActive() && selFlag[i] !== 1) continue;
     const [x, y] = toScreen(xy[i]), d = (x - mx) ** 2 + (y - my) ** 2;
@@ -567,17 +662,26 @@ function orderMembers(m, order, seed) {
 }
 function groupMembers() {
   const sc = scheme(), m = [];
-  for (let i = 0; i < N; i++) if (sc.id(i) === isolate) m.push(i);
+  for (let i = 0; i < N; i++) if (sc.id(i) === isolate && !hidden(i)) m.push(i);
   const leg = sc.legend.find(l => l[2] === isolate);
   return { m, label: leg ? leg[1] : String(isolate) };
+}
+function isolateHiddenCount() {                   // members of the highlighted group that are hidden as explicit
+  const sc = scheme(); let n = 0;
+  for (let i = 0; i < N; i++) if (sc.id(i) === isolate && hidden(i)) n++;
+  return n;
 }
 function renderGroup() {
   const { m, label } = groupMembers(), order = $("gorder").value, K = 18;
   $("grouptitle").innerHTML = label;
   $("groupn").textContent = `${m.length.toLocaleString()} samples`;
   const pick = orderMembers(m, order, gSeed * 7919 + isolate * 31).slice(0, K);
-  $("gallery").innerHTML = pick.map(i => `<figure data-i="${i}"><img src="${D.thumbs[i]}" loading="lazy">
-    <figcaption>${D.classes[D.lab[i]]}</figcaption></figure>`).join("");
+  const nHid = NSFW ? isolateHiddenCount() : 0;
+  $("gallery").innerHTML = pick.length ? pick.map(i => `<figure data-i="${i}"><img src="${thumb(i)}" loading="lazy">
+    <figcaption>${D.classes[D.lab[i]]}</figcaption></figure>`).join("") :
+    `<p style="color:var(--muted);font-size:12px;grid-column:1/-1">All samples of this group are hidden because they are flagged as explicit. ` +
+    `Tick &ldquo;show explicit images&rdquo; in the header to see them.</p>`;
+  if (pick.length && nHid) $("groupn").textContent += ` (+ ${nHid.toLocaleString()} hidden as explicit)`;
   // composition of the group by art style
   const cnt = Array(NC).fill(0); m.forEach(i => cnt[D.lab[i]]++);
   $("comptitle").textContent = "Art styles in this group";
@@ -598,7 +702,7 @@ function updateSide() {
 function tip(i, mx, my) {
   const t = $("tip");
   if (i < 0 || !listView()) { t.hidden = true; return; }
-  t.hidden = false; t.querySelector("img").src = D.thumbs[i]; t.querySelector("span").textContent = D.classes[D.lab[i]];
+  t.hidden = false; t.querySelector("img").src = thumb(i); t.querySelector("span").textContent = D.classes[D.lab[i]];
   const w = map.clientWidth, h = map.clientHeight;
   t.style.left = Math.min(mx + 16, w - 160) + "px"; t.style.top = Math.min(my + 16, h - 180) + "px";
 }
@@ -645,6 +749,7 @@ function finishSelection() {
   for (const [x, y] of poly) { bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); by0 = Math.min(by0, y); by1 = Math.max(by1, y); }
   const xy = curProj(), sc = scheme(), inside = [];
   for (let i = 0; i < N; i++) {
+    if (hidden(i)) continue;
     if (isolate !== null && sc.id(i) !== isolate) continue;        // only what is visible can be selected
     const [x, y] = toScreen(xy[i]);
     if (x < bx0 || x > bx1 || y < by0 || y > by1) continue;
@@ -675,7 +780,7 @@ function renderSelection() {
     (isolate !== null ? " (within the highlighted group)" : "");
   $("selpos").textContent = `${from + 1}\u2013${from + pick.length} of ${n.toLocaleString()} · page ${selPage + 1}/${pages}`;
   $("selprev").disabled = selPage === 0; $("selnext").disabled = selPage >= pages - 1;
-  $("selgallery").innerHTML = pick.map(i => `<figure data-i="${i}"><img src="${D.thumbs[i]}" loading="lazy">
+  $("selgallery").innerHTML = pick.map(i => `<figure data-i="${i}"><img src="${thumb(i)}" loading="lazy">
     <figcaption>${D.classes[D.lab[i]]}</figcaption></figure>`).join("");
   const cnt = Array(NC).fill(0); selList.forEach(i => cnt[D.lab[i]]++);
   $("comptitle").textContent = "Art styles in the selection";
@@ -782,15 +887,162 @@ window.addEventListener("resize", () => { fitCanvas(); resetView(); schedule(); 
   if (window.ResizeObserver) new ResizeObserver(() => { fitCanvas(); schedule(); }).observe($("mapwrap"));
 })();
 
-setBounds(); fitCanvas(); resetView(); draw(); show(0);
+const firstVisible = () => { for (let i = 0; i < N; i++) if (!hidden(i)) return i; return -1; };
+function refreshExplicit() {      // the "show explicit images" tick changed: bring every view in line with it
+  if (pinned >= 0 && hidden(pinned)) pinned = -1;
+  if (hover >= 0 && hidden(hover)) hover = -1;
+  if (qpt >= 0 && hidden(qpt)) qpt = -1;
+  if (ptA >= 0 && hidden(ptA)) ptA = -1;
+  if (ptB >= 0 && hidden(ptB)) ptB = -1;
+  if (selList.length) setSelection(selList.filter(i => !hidden(i)));
+  if (mode === "knn") computeKnn(); else if (mode === "interp") computeInterp();
+  const cur = pinned >= 0 ? pinned : hover, f0 = firstVisible();
+  if (cur >= 0) show(cur); else if (f0 >= 0 && !listView()) show(f0);
+  updateSide(); schedule();
+}
+if (NSFW) {
+  const nf = NSFW.reduce((a, v) => a + v, 0);
+  const lab = () => { $("explcount").textContent = `(${nf.toLocaleString()} of ${N.toLocaleString()} flagged${showExplicit ? "" : ", hidden"})`; };
+  $("explwrap").hidden = false; $("showexpl").checked = showExplicit; lab();
+  $("showexpl").addEventListener("change", () => {
+    showExplicit = $("showexpl").checked;
+    try { localStorage.setItem(EXPL_KEY, showExplicit ? "1" : "0"); } catch (e) {}
+    lab(); refreshExplicit(); });
+  window.addEventListener("storage", e => {        // another tab (e.g. the overview page) changed it
+    if (e.key !== EXPL_KEY) return;
+    showExplicit = e.newValue === "1"; $("showexpl").checked = showExplicit; lab(); refreshExplicit(); });
+}
+setBounds(); fitCanvas(); resetView(); draw(); { const f0 = firstVisible(); if (f0 >= 0) show(f0); }
 </script></body></html>
 """
 
 
-def write_explorer(path: str | Path, payload: dict, title: str) -> Path:
-    """Write the explorer page for ``payload`` (see scripts/08_build_explorer.py)."""
+# ── per-image data shared by all pages of a dataset (meta/<name>.js) ──────────
+# Every model's pages of one dataset show the same images, so their labels, thumbnails, palettes, colour themes,
+# attributes, ... are identical.  They are written once per dataset to meta/<prefix>-<content hash>.js and each page
+# keeps only its sample indices ``idx`` into it.  The hash in the name means a page always loads exactly the data it
+# was checked against, even after the meta of a dataset changes (e.g. new attributes).
+
+META_KEYS = ("lab", "files", "thumbs", "pal_c", "pal_w", "light", "chroma", "dom_ref", "year", "nsfw", "theme")
+_META_PREFIX = "window.EXPLORER_META="
+_META_CACHE: dict[str, dict] = {}
+
+
+def write_meta(out_dir: str | Path, prefix: str, fields: dict) -> str:
+    """Write the shared per-image ``fields`` of ALL images of a dataset (row i = image i of the representation file,
+    i.e. the page indices ``idx``) to ``out_dir``/meta; returns the meta name to pass to :func:`write_explorer`."""
+    m = {k: fields[k] for k in META_KEYS if fields.get(k) is not None}
+    m["attrs"] = {a["key"]: {x: a[x] for x in ("kind", "lo", "hi", "b64") if x in a}
+                  for a in fields.get("attrs") or [] if "b64" in a}
+    body = json.dumps(m, separators=(",", ":"))
+    name = f"{prefix}-{hashlib.sha1(body.encode()).hexdigest()[:10]}"
+    m.update(name=name, n=len(m["files"]))
+    path = Path(out_dir) / "meta" / f"{name}.js"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_META_PREFIX + json.dumps(m, separators=(",", ":")) + ";\n")
+    _META_CACHE[name] = m
+    return name
+
+
+def load_meta(out_dir: str | Path, name: str) -> dict:
+    if name not in _META_CACHE:
+        text = (Path(out_dir) / "meta" / f"{name}.js").read_text()
+        _META_CACHE[name] = json.loads(text[len(_META_PREFIX):].rstrip().rstrip(";"))
+    return _META_CACHE[name]
+
+
+def _decode_attr(a: dict) -> np.ndarray:
+    raw = base64.b64decode(a["b64"])
+    if a["kind"] == "num":
+        q = np.frombuffer(raw, np.uint16).astype(float)
+        return np.where(q == 65535, np.nan, a["lo"] + q / 65534 * ((a["hi"] - a["lo"]) or 1.0))
+    return np.frombuffer(raw, np.int32 if a["kind"] == "color" else np.int16)
+
+
+def _attr_matches(a: dict, m: dict, idx: np.ndarray) -> bool:
+    if a.get("kind") != m["kind"] or "b64" not in a:
+        return False
+    v, w = _decode_attr(a), _decode_attr(m)[idx]
+    if len(v) != len(w):
+        return False
+    if a["kind"] != "num":
+        return bool(np.array_equal(v, w))
+    nan = np.isnan(v)        # both are uint16-quantized over their own [lo, hi]: allow one step of each
+    tol = (((a["hi"] - a["lo"]) or 1.0) + ((m["hi"] - m["lo"]) or 1.0)) / 65534
+    return bool(np.array_equal(nan, np.isnan(w)) and np.all(np.abs(v[~nan] - w[~nan]) <= tol * 1.001))
+
+
+def split_meta(payload: dict, out_dir: str | Path, meta: str) -> dict:
+    """``payload`` without the fields that equal meta ``meta`` at the page's ``idx`` (any other field stays inline)."""
+    M = load_meta(out_dir, meta)
+    idx = np.asarray(payload.get("idx", []), dtype=np.int64)
+    if not len(idx) or idx.min() < 0 or idx.max() >= M["n"]:
+        return payload
+    out, moved = dict(payload), []
+    for k in META_KEYS:
+        v, mv = payload.get(k), M.get(k)
+        if v is None or mv is None:
+            continue
+        if k == "theme":
+            ok = set(v) == set(mv) and all(v[kk] == [mv[kk][i] for i in idx] for kk in v)
+        else:
+            ok = v == [mv[i] for i in idx]
+        if ok:
+            del out[k]
+            moved.append(k)
+    attrs, n_attr = [], 0
+    for a in payload.get("attrs") or []:
+        m = M["attrs"].get(a["key"])
+        if m is not None and _attr_matches(a, m, idx):
+            a = {k: v for k, v in a.items() if k not in ("b64", "lo", "hi")}
+            a["meta"] = 1
+            n_attr += 1
+        attrs.append(a)
+    if not moved and not n_attr:
+        return payload
+    if "attrs" in payload:
+        out["attrs"] = attrs
+    out.update(meta=meta, meta_keys=moved)
+    return out
+
+
+def hydrate(payload: dict, out_dir: str | Path) -> dict:
+    """Inverse of :func:`split_meta` (used when re-rendering pages): the page's rows of its meta put back inline."""
+    if not payload.get("meta"):
+        return payload
+    M = load_meta(out_dir, payload["meta"])
+    idx = np.asarray(payload["idx"], dtype=np.int64)
+    d = {k: v for k, v in payload.items() if k not in ("meta", "meta_keys")}
+    for k in payload["meta_keys"]:
+        d[k] = {kk: [v[i] for i in idx] for kk, v in M[k].items()} if k == "theme" else [M[k][i] for i in idx]
+    attrs = []
+    for a in payload.get("attrs") or []:
+        if a.get("meta"):
+            m = M["attrs"][a["key"]]
+            raw = np.frombuffer(base64.b64decode(m["b64"]),
+                                {"num": np.uint16, "color": np.int32}.get(m["kind"], np.int16))[idx]
+            a = {k: v for k, v in a.items() if k != "meta"}
+            a["b64"] = base64.b64encode(np.ascontiguousarray(raw).tobytes()).decode()
+            if m["kind"] == "num":
+                a.update(lo=m["lo"], hi=m["hi"])
+        attrs.append(a)
+    if "attrs" in payload:
+        d["attrs"] = attrs
+    return d
+
+
+def write_explorer(path: str | Path, payload: dict, title: str, meta: str | None = None) -> Path:
+    """Write the explorer page for ``payload`` (see scripts/08_build_explorer.py).  With ``meta`` (from
+    :func:`write_meta`, in the page's directory) the per-image fields found there are left out of the page."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    html = HTML_TEMPLATE.replace("__TITLE__", title)
+    if "style_colors" not in payload and payload.get("classes"):
+        from src.visualization.style_colors import style_colors, style_years
+        payload = {**payload, "style_colors": style_colors(payload["classes"]), "style_years": style_years(payload["classes"])}
+    if meta:
+        payload = split_meta(payload, path.parent, meta)
+    script = f'<script src="meta/{payload["meta"]}.js"></script>\n' if payload.get("meta") else ""
+    html = HTML_TEMPLATE.replace("__TITLE__", title).replace("__META_SCRIPT__", script)
     path.write_text(html.replace("__DATA__", json.dumps(payload, separators=(",", ":"))))
     return path
