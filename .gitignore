@@ -61,3 +61,6 @@ checkpoints/
 # Training runs (config, checkpoints, weights, logs, recon images, wandb files)
 runs/
 wandb/
+
+# Crash dumps
+core.*

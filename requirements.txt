@@ -36,3 +36,6 @@ rich>=13.0.0                 # pretty terminal output
 # Notebook (optional)
 jupyterlab>=4.0.0
 ipywidgets>=8.0.0
+
+# Explorer: nudity flags (scripts/15_flag_nudity.py)
+nudenet>=3.4.0          # pulls in onnxruntime
