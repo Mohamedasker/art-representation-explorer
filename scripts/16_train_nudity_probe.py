@@ -20,6 +20,7 @@ Prints average precision, ROC-AUC and the precision reached at 80 / 90 / 95 % re
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -54,6 +55,7 @@ def report(name, y, s):
 
 
 def main() -> None:
+    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
     wa = np.load(OUT / "scores_wikiart.npz", allow_pickle=False)
     ab = np.load(OUT / "scores_artbench.npz", allow_pickle=False)
     f_wa = np.load(OUT / "clipL14_features_wikiart.npy").astype(np.float32)
