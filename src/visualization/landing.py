@@ -77,7 +77,7 @@ header.hero { padding:56px 0 28px; }
 .hero h1 span { background:linear-gradient(90deg,var(--accent),#ff7a7a 60%,var(--accent2)); -webkit-background-clip:text;
        background-clip:text; color:transparent; }
 .hero p { margin:0; max-width:780px; color:var(--muted); font-size:16px; }
-.explbox { display:flex; gap:12px; align-items:flex-start; margin-top:18px; padding:12px 16px; max-width:780px; cursor:pointer;
+.explbox { display:flex; gap:12px; align-items:flex-start; margin:34px 0 0; padding:12px 16px; max-width:780px; cursor:pointer;
           background:var(--panel); border:1px solid var(--line); border-radius:12px; }
 .explbox input { margin-top:4px; transform:scale(1.25); }
 .explbox b { display:block; color:var(--fg); font-size:14px; }
@@ -137,11 +137,6 @@ footer { margin-top:48px; color:var(--muted); font-size:12.5px; }
      label-supervised models. Open a card for an interactive map (UMAP, t-SNE, PCA) that you can colour by cluster, art style,
      colour, painting date, metadata and CLIP-derived content, mood and aesthetics.</p>
   <div class="stats" id="stats"></div>
-  <label class="explbox" id="explbox"><input type="checkbox" id="showexpl">
-    <div><b>Show explicit images</b>
-    <span id="expltext">Paintings that contain nudity are flagged automatically and are hidden by default: they are not drawn in the maps
-      and their images are never loaded. Tick this to include the full, unfiltered dataset in every map (the choice is remembered
-      in this browser and applies to all explorer pages).</span></div></label>
 </header>
 <section class="viewers" style="margin-top:0">
   <a class="vcard" href="#explorer"><small>viewer 1</small><h3>Embedding explorer</h3>
@@ -154,6 +149,11 @@ footer { margin-top:48px; color:var(--muted); font-size:12.5px; }
 <div id="explorer"></div>
 <div class="tabs" id="tabs"></div>
 <div class="grid" id="grid"></div>
+<label class="explbox" id="explbox"><input type="checkbox" id="showexpl">
+    <div><b>Show explicit images</b>
+    <span id="expltext">Paintings that contain nudity are flagged automatically and are hidden by default: they are not drawn in the maps
+      and their images are never loaded. Tick this to include the full, unfiltered dataset in every map (the choice is remembered
+      in this browser and applies to all explorer pages).</span></div></label>
 <section><h2>How do the embeddings compare?</h2>
   <p class="lead">k-means clusters (k = number of art styles, run on the embedding) versus the true art styles.
      Higher is better; the best model per column is highlighted.</p>
