@@ -39,6 +39,18 @@ Usage examples
         --dataset artbench \\
         --split train
 
+# Masked autoencoder: Meta's ImageNet ViT-B/16 (frozen), and one trained with scripts/12_train_mae.py
+# (mean-pooled patch tokens of the encoder on the unmasked image, 768-D):
+    python scripts/02_extract_features.py --model mae_imagenet --dataset artbench --split both
+    python scripts/02_extract_features.py --model mae --checkpoint runs/<run>/mae_final.pt \\
+        --dataset wikiart --split both        # -> representations/wikiart_mae_adapt_artbench_{train,test}.npz
+
+# SimCLR ResNet-50 (2048-D pooled encoder output): the published ImageNet SimCLR v1 weights (frozen), and one trained
+# with scripts/13_train_simclr.py (-> representations/<dataset>_simclr_<train dataset>_<aug set>_{train,test}.npz):
+    python scripts/02_extract_features.py --model simclr_imagenet --dataset artbench --split both
+    python scripts/02_extract_features.py --model simclr --checkpoint runs/<run>/simclr_final.pt \\
+        --dataset artbench --split both
+
 # Custom checkpoint (ResNet fine-tuned on ArtBench):
     python scripts/02_extract_features.py \\
         --model resnet50 \\
@@ -65,7 +77,8 @@ from src.models.base_extractor import RepresentationBundle
 
 # ── Model registry ────────────────────────────────────────────────────────────
 
-def _get_extractor(model_id: str, checkpoint, batch_size: int, device: str | None, ae_pool: int = 4):
+def _get_extractor(model_id: str, checkpoint, batch_size: int, device: str | None, ae_pool: int = 4,
+                   mae_pool: str = "mean"):
     """Resolve model ID string to an extractor instance."""
     from src.models.clip_extractor import CLIP_PRESETS, CLIPExtractor
     from src.models.ssl_extractor import SSL_MODELS, SSLExtractor
@@ -74,6 +87,16 @@ def _get_extractor(model_id: str, checkpoint, batch_size: int, device: str | Non
     if model_id == "autoencoder":
         from src.models.ae_extractor import AutoencoderExtractor
         return AutoencoderExtractor(checkpoint=checkpoint, pool=ae_pool, batch_size=batch_size, device=device)
+
+    if model_id in ("mae", "mae_imagenet"):
+        from src.models.mae_extractor import MAEExtractor
+        return MAEExtractor(checkpoint=checkpoint if model_id == "mae" else None, pool=mae_pool,
+                            batch_size=batch_size, device=device)
+
+    if model_id in ("simclr", "simclr_imagenet"):
+        from src.models.simclr_extractor import SimCLRExtractor
+        return SimCLRExtractor(checkpoint=checkpoint if model_id == "simclr" else None,
+                               batch_size=batch_size, device=device)
 
     if model_id == "cnn_supervised":
         from src.models.supervised_extractor import SupervisedCNNExtractor
@@ -140,6 +163,12 @@ def main() -> None:
         help="--model autoencoder only: average-pool the 8x8 latent to NxN (0 = full 4096-D latent).",
     )
     parser.add_argument(
+        "--mae-pool",
+        choices=["mean", "cls", "both"],
+        default="mean",
+        help="--model mae / mae_imagenet only: mean-pooled patch tokens (768-D), CLS token, or both.",
+    )
+    parser.add_argument(
         "--dataset",
         choices=["artbench", "wikiart"],
         default="artbench",
@@ -200,6 +229,7 @@ def main() -> None:
         batch_size=args.batch_size,
         device=args.device,
         ae_pool=args.ae_pool,
+        mae_pool=args.mae_pool,
     )
 
     # Build the transform from the extractor
@@ -210,6 +240,8 @@ def main() -> None:
     model_slug = MODEL_SLUGS.get(args.model, args.model).replace("/", "_").replace(":", "_")
     if args.checkpoint and args.model == "resnet50":
         model_slug = "resnet50_custom"
+    if hasattr(extractor, "file_slug"):      # MAE: slug names the model (and the dataset it was trained on)
+        model_slug = extractor.file_slug + ("" if args.mae_pool == "mean" else f"_{args.mae_pool}")
     parts: list[RepresentationBundle] = []
 
     for split in splits:
