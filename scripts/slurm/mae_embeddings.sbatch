@@ -23,6 +23,21 @@ export OMP_NUM_THREADS=4
 echo "host=$(hostname) job=${SLURM_JOB_ID:-none} start=$(date -Is)"
 EXTRACT=".venv/bin/python scripts/02_extract_features.py --split both --batch-size 128 --num-workers 30"
 
+# MAE_RUNS=auto: the newest finished-or-not from-scratch run per dataset (dir names carry the start time)
+if [[ "${MAE_RUNS:-}" == "auto" ]]; then
+    MAE_RUNS=""
+    for ds in artbench wikiart; do
+        r=$(ls -d runs/*_mae_${ds}_scratch 2>/dev/null | tail -1 || true)
+        [[ -n "$r" ]] && MAE_RUNS="$MAE_RUNS $r"
+    done
+fi
+# a run that stopped at the Slurm time limit is continued here (last.pt -> mae_final.pt) before its embeddings are made
+for run in ${MAE_RUNS:-}; do
+    if [[ ! -f "$run/mae_final.pt" ]]; then
+        .venv/bin/torchrun --standalone --nproc_per_node=4 scripts/12_train_mae.py --resume "$run" --time-limit-min 100
+    fi
+done
+
 ck() { [[ -f "$1/mae_final.pt" ]] && echo "$1/mae_final.pt" || echo "$1/checkpoints/last.pt"; }
 
 # stream 0/1: frozen ImageNet MAE on one dataset each; streams 2/3 start with the trained MAEs (cross-dataset first)
