@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .variants import variant_info
+from .variants import FAMILIES, family_order, family_title, member_of, variant_info
 
 def _simclr_info() -> list:
     """Overview entries for the SimCLR models: frozen ImageNet weights + one per training dataset (its augmentation-set
@@ -96,7 +96,10 @@ a.vcard:hover { transform:translateY(-3px); border-color:var(--accent); box-shad
 a.vcard small { color:var(--accent); font-size:11px; letter-spacing:.08em; text-transform:uppercase; }
 a.vcard h3 { margin:6px 0 8px; font-size:22px; } a.vcard p { margin:0 0 14px; color:var(--muted); font-size:14px; }
 a.vcard span { color:var(--accent); font-size:13px; }
-.tabs { display:flex; gap:8px; margin:34px 0 18px; }
+.tabrow { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:34px 0 18px; }
+.tabs { display:flex; gap:8px; margin:0; }
+.allbtn { color:var(--accent); text-decoration:none; border:1px solid var(--accent); border-radius:10px; padding:9px 16px; font-size:14px;
+          background:var(--panel); transition:background .15s; } .allbtn:hover { background:#2a2417; }
 .tab { cursor:pointer; background:var(--panel); border:1px solid var(--line); color:var(--muted); border-radius:10px;
        padding:9px 16px; font-size:14px; } .tab small { display:block; font-size:11px; opacity:.8; }
 .tab.on { color:var(--fg); border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
@@ -115,6 +118,7 @@ a.vcard span { color:var(--accent); font-size:13px; }
 .f-Unsupervised { color:#6ee7b7; } .f-Self-supervised { color:#93c5fd; } .f-Language-supervised { color:#f0abfc; }
 .f-Supervised { color:#fcd34d; }
 .card h3 { margin:0 0 4px; font-size:18px; }
+.wnow { color:var(--muted); font-size:12px; margin:-2px 0 8px; } .wnow b { color:var(--fg); font-weight:600; }
 .card p { margin:0 0 12px; color:var(--muted); font-size:13px; min-height:58px; }
 .kv { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
 .kv div { background:var(--panel2); border-radius:8px; padding:6px 8px; }
@@ -143,14 +147,14 @@ footer { margin-top:48px; color:var(--muted); font-size:12.5px; }
 </header>
 <section class="viewers" style="margin-top:0">
   <a class="vcard" href="#explorer"><small>viewer 1</small><h3>Embedding explorer</h3>
-    <p>Interactive 2D maps (UMAP, t-SNE, PCA) of the image embeddings of five models. Colour by cluster, art style, metadata
+    <p>Interactive 2D maps (UMAP, t-SNE, PCA) of the image embeddings of every model type, with a menu for its weights. Colour by cluster, art style, metadata
        and CLIP-derived content; select regions, inspect neighbours, interpolate between paintings.</p><span>Choose a model below &darr;</span></a>
   <a class="vcard" href="featuremaps/index.html"><small>viewer 2</small><h3>Feature-map viewer</h3>
     <p>Look inside the networks: the channel activations, principal-component colour maps and activation / attention overlays of the
        trained ResNet-50, the ImageNet ResNet-50, the autoencoder, DINOv2 and CLIP, layer by layer, for a painting of your choice.</p><span>Open the feature-map viewer &rarr;</span></a>
 </section>
 <div id="explorer"></div>
-<div class="tabs" id="tabs"></div>
+<div class="tabrow"><div class="tabs" id="tabs"></div><a class="allbtn" id="allbtn" href="models.html"></a></div>
 <div class="grid" id="grid"></div>
 <label class="explbox" id="explbox"><input type="checkbox" id="showexpl">
     <div><b>Show explicit images</b>
@@ -201,17 +205,22 @@ function renderTabs() {
   $("tabs").innerHTML = D.datasets.map(d => `<div class="tab ${d.key === current ? "on" : ""}" data-k="${d.key}">${d.name}<small>${d.sub}</small></div>`).join("");
   document.querySelectorAll(".tab").forEach(t => t.onclick = () => { current = t.dataset.k; renderTabs(); renderGrid(); });
 }
+const ALL = !!D.all;          // models.html: every model with every set of weights, one card each; index.html: one card per model type
 function renderGrid() {
-  const items = D.entries.filter(e => e.dataset === current);
-  $("grid").innerHTML = items.map(e => `<div class="card"><a class="main" href="${e.href}">
+  const items = D.entries.filter(e => e.dataset === current), groups = [], at = {};
+  if (ALL) items.forEach(e => groups.push([e]));
+  else for (const e of items) { if (!(e.fam in at)) { at[e.fam] = groups.length; groups.push([]); } groups[at[e.fam]].push(e); }
+  $("grid").innerHTML = groups.map(g => { const e = g[0];             // card = the default weights of this model type
+    return `<div class="card"><a class="main" href="${e.href}">
     <canvas class="prev" data-s="${e.stem}"></canvas>
     <div class="body"><span class="fam f-${e.family.split(",")[0].replace(/\s/g, "-")}">${e.family}</span>
-      <h3>${e.title}</h3><p>${e.desc}</p>
+      <h3>${ALL ? e.title : e.fam_title}</h3>${g.length > 1 ? `<div class="wnow">weights shown: <b>${e.wlabel}</b></div>` : ""}<p>${e.desc}</p>
       <div class="kv"><div><b>${e.dim}</b><span>dimensions</span></div>
         <div><b>${fmt(e.nmi)}</b><span>cluster/style NMI</span></div>
         <div><b>${fmt(e.sil)}</b><span>silhouette</span></div></div>
       <div class="open">Open interactive map &rarr;</div></div></a>
-    ${(e.sets || []).length > 1 ? `<div class="sets">image sets: ${e.sets.map(s => `<a href="${s.href}">${s.label}</a>`).join("")}</div>` : ""}</div>`).join("");
+    ${g.length > 1 ? `<div class="sets">weights: ${g.map(m => `<a href="${m.href}" title="${m.desc.replace(/"/g, "&quot;")}">${m.wlabel}</a>`).join("")}</div>` : ""}
+    ${(e.sets || []).length > 1 ? `<div class="sets">image sets: ${e.sets.map(s => `<a href="${s.href}">${s.label}</a>`).join("")}</div>` : ""}</div>`; }).join("");
   document.querySelectorAll("canvas.prev").forEach(drawPreview);
 }
 function drawPreview(cv) {
@@ -242,6 +251,16 @@ addEventListener("resize", () => document.querySelectorAll("canvas.prev").forEac
   $("table").innerHTML = `<table>${head}${rows.join("")}</table>`;
 })();
 $("features").innerHTML = D.features.map(f => `<div class="chip"><b>${f[0]}</b><span>${f[1]}</span></div>`).join("");
+$("allbtn").href = ALL ? "index.html" : "models.html";
+$("allbtn").textContent = ALL ? "\u2190 Back to the overview (one card per model type)" : "Show all models with all weights \u2192";
+if (ALL) {
+  document.title = "All models and weights \u00b7 Art representation explorer";
+  document.querySelector(".hero h1").innerHTML = "All models, <span>all weights</span>";
+  document.querySelector(".hero p").textContent = "Every model with every set of weights, one card per dataset and weights: " +
+    "ImageNet, adapted and from-scratch variants side by side. Open a card for its interactive map (UMAP, t-SNE, PCA).";
+  document.querySelector("section.viewers").style.display = "none";      // (the class sets display:grid, which beats [hidden])
+  $("features").closest("section").style.display = "none";
+}
 renderTabs(); renderGrid();
 </script></body></html>
 """
@@ -265,11 +284,14 @@ def write_index(path: str | Path, built: list[dict], n_samples: int) -> Path:
         sp = b["stem"].rsplit("_", 1)[-1]
         ds = f"{ds}_{sp if sp in ('train', 'test') else 'all'}"
         key, title, family, desc = _kind(b["stem"])
+        mo = member_of(b["stem"])                       # model type + weights (see variants.FAMILIES)
+        wl = next((lb for fk, _t, ms in FAMILIES if mo and fk == mo[0] for k, lb in ms if k == mo[1]), title)
         entries.append({"stem": b["stem"], "href": f"{b['stem']}.html", "dataset": ds, "model": key,
+                        "fam": mo[0] if mo else key, "fam_title": family_title(mo[0]) if mo else title, "wlabel": wl,
                         "title": title, "family": family, "desc": desc, "sets": b.get("sets_links", []),
                         **b["summary"]})
     order = {k: i for i, (k, *_r) in enumerate(MODEL_INFO)}
-    entries.sort(key=lambda e: (e["dataset"], order.get(e["model"], 99)))
+    entries.sort(key=lambda e: (e["dataset"], family_order(e["stem"]), e["stem"]))     # cards: model types in order, default weights first
     models = [{"key": k, "title": t, "family": f} for k, t, f, _ in MODEL_INFO if any(e["model"] == k for e in entries)]
     datasets = [{"key": k, "name": n, "sub": s} for k, (n, s) in DATASETS.items() if any(e["dataset"] == k for e in entries)]
 
@@ -288,11 +310,14 @@ def write_index(path: str | Path, built: list[dict], n_samples: int) -> Path:
         features.append([f"{g}  ({len(names)})", f"{d}. {sample}"])
 
     n_ds = len(datasets)
-    stats = [[str(len(entries)), "interactive maps"], [str(len(models)), "representations"],
+    n_types = len({e["fam"] for e in entries})
+    stats = [[str(n_types), "model types"], [str(len({e["model"] for e in entries})), "weights"],
              [str(n_ds), "datasets"], ["UMAP · t-SNE · PCA", "projections"],
              [f"{n_samples:,}", "images per map"]]
     data = {"entries": entries, "models": models, "datasets": datasets, "features": features, "stats": stats}
-    html = TEMPLATE.replace("__NS__", f"{n_samples:,}").replace("__DATA__", json.dumps(data, separators=(",", ":")))
     path = Path(path)
-    path.write_text(html)
+    for target, flat in ((path, False), (path.with_name("models.html"), True)):    # overview + "all models, all weights"
+        html = TEMPLATE.replace("__NS__", f"{n_samples:,}").replace(
+            "__DATA__", json.dumps({**data, "all": flat}, separators=(",", ":")))
+        target.write_text(html)
     return path
