@@ -9,10 +9,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-# order shown on the page; (substring of the stem, short label, family, description)
+from .variants import variant_info
+
 def _simclr_info() -> list:
-    """Overview entries for the SimCLR models: frozen ImageNet weights + one per (training dataset, augmentation set)
-    from configs/aug_sets.yaml (specific keys; matching is by substring of the page stem)."""
+    """Overview entries for the SimCLR models: frozen ImageNet weights + one per training dataset (its augmentation-set
+    variants live in a drop-down inside the page, see src/visualization/variants.py)."""
     import yaml
     out = [("simclr_imagenet", "SimCLR ResNet-50 (ImageNet)", "Self-supervised, contrastive · off-the-shelf",
             "Published ImageNet-1k SimCLR v1 ResNet-50 (1x), frozen. Global-pooled encoder output, 2048-D; never trained on art.")]
@@ -20,14 +21,16 @@ def _simclr_info() -> list:
         sets = yaml.safe_load((Path(__file__).resolve().parents[2] / "configs" / "aug_sets.yaml").read_text())
     except OSError:
         return out
+    n = len(sets)
     for ds, dname in (("artbench", "ArtBench"), ("wikiart", "WikiArt")):
-        for aug, spec in sets.items():
-            out.append((f"simclr_{ds}_{aug}", f"SimCLR · {dname} · {aug}", "Self-supervised, contrastive · in-domain",
-                        f"ResNet-50 SimCLR trained from scratch on {dname} train only, augmentation set '{aug}': "
-                        f"{spec['description']}. {spec['intent']} 2048-D pooled encoder output."))
+        out.append((f"simclr_{ds}", f"SimCLR · trained on {dname}", "Self-supervised, contrastive · in-domain",
+                    f"ResNet-50 SimCLR trained from scratch on {dname} train only (2048-D pooled encoder output). Shown: the "
+                    f"standard augmentation set; the other {n - 1} augmentation sets (colour-heavy, edge/texture, rotation, "
+                    f"geometry-heavy, no-colour, blur-heavy, crop-only) are in the 'Augmentation set' menu inside the page."))
     return out
 
 
+# order shown on the page; (substring of the stem, short label, family, description)
 MODEL_INFO = [
     ("cnn_supervised", "ResNet-50 (trained here)", "Supervised, in-domain",
      "Trained from scratch on ArtBench + WikiArt to predict style, genre and artist (multi-task)."),
@@ -255,6 +258,9 @@ def write_index(path: str | Path, built: list[dict], n_samples: int) -> Path:
     """``built`` = the dicts returned by ``scripts/08_build_explorer.build`` (with preview / summary fields)."""
     entries = []
     for b in built:
+        vi = variant_info(b["stem"])
+        if vi is not None and not vi["default"]:      # augmentation variants are reached from the family page's drop-down
+            continue
         ds = "artbench" if b["stem"].startswith("artbench") else "wikiart"
         sp = b["stem"].rsplit("_", 1)[-1]
         ds = f"{ds}_{sp if sp in ('train', 'test') else 'all'}"

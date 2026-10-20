@@ -107,6 +107,7 @@ button:hover { border-color:#666; }
 <header>
   <h1>__TITLE__</h1><span class="sub" id="subtitle"></span>
   <span class="sub" id="nav"></span>
+  <span id="varwrap" hidden><label>Augmentation set </label><select id="varsel"></select></span>
   <span id="setwrap" hidden><label>Images </label><select id="setsel"></select></span>
   <span><label>Projection </label><select id="projsel"></select></span>
   <span><label>Cluster space </label><select id="spacesel"></select></span>
@@ -264,6 +265,11 @@ if ((D.sets || []).length > 1) {                 // other sample sets / the full
 }
 $("nav").innerHTML = `<a href="index.html">&#8962; overview</a> &middot; ` + D.siblings.map(s =>
   `<a href="${s.href}" class="${s.current ? "cur" : ""}">${s.name}</a>`).join("");
+if ((D.variants || []).length > 1) {            // variants of this model (e.g. SimCLR augmentation sets)
+  $("varwrap").hidden = false;
+  for (const v of D.variants) { const o = new Option(v.label, v.href); if (v.current) o.selected = true; $("varsel").add(o); }
+  $("varsel").addEventListener("change", () => { location.href = $("varsel").value; });
+}
 if (D.siblings.length > 8) {                     // many models: a drop-down instead of a link per model
   $("nav").innerHTML = `<a href="index.html">&#8962; overview</a> &middot; <select id="navsel" title="other representations of this dataset">` +
     D.siblings.map(s => `<option value="${s.href}"${s.current ? " selected" : ""}>${s.name}</option>`).join("") + `</select>`;

@@ -64,6 +64,7 @@ from src.reduction.dimensionality import umap
 from src.visualization.explorer import write_explorer, write_meta
 from src.visualization.style_colors import style_colors
 from src.visualization.landing import write_index
+from src.visualization.variants import variant_info
 
 _SKIP_SUBSTRINGS = ("color_profiles",)
 
@@ -550,8 +551,21 @@ def main() -> None:
     def finalize(b: dict) -> None:
         """Write one page right after it is built (a job that hits its time limit keeps what it finished)."""
         pl, stem = b["payload"], b["stem"]
-        pl["siblings"] = [{"name": o, "href": set_page(o, b["key"]), "current": o == stem} for o in by_stem
-                          if group_of(o) == group_of(stem) and b["key"] in [k for k, *_ in views[o]]]
+        vi = variant_info(stem)
+        pl["siblings"] = [{"name": o, "href": set_page(o, b["key"]),
+                           "current": o == stem or (vi is not None and variant_info(o) is not None
+                                                    and variant_info(o)["family"] == vi["family"])} for o in by_stem
+                          if group_of(o) == group_of(stem) and b["key"] in [k for k, *_ in views[o]]
+                          and (variant_info(o) is None or variant_info(o)["default"])]
+        if vi is not None:        # augmentation-set drop-down: the members of this variant family (default first)
+            # members built in THIS run, plus members whose page already exists from an earlier run
+            known = set(by_stem) | {q.stem for q in Path(args.repr_dir).glob("*.npz")}
+            fam = sorted((o for o in known if (variant_info(o) or {}).get("family") == vi["family"]
+                          and (b["key"] in [k for k, *_ in views[o]] if o in views
+                               else (out_dir / set_page(o, b["key"])).exists())),
+                         key=lambda o: variant_info(o)["order"])
+            pl["variants"] = [{"label": variant_info(o)["label"], "href": set_page(o, b["key"]), "current": o == stem}
+                              for o in fam]
         pl["sets"] = [{"label": lb, "href": set_page(stem, k), "current": k == b["key"]} for k, lb, _ in views[stem]]
         b["sets_links"] = pl["sets"]
         p = write_explorer(out_dir / b["page"], pl, f"Explorer · {stem}", meta=b["meta"])
