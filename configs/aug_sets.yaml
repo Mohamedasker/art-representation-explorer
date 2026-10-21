@@ -1,0 +1,108 @@
+# Named augmentation sets for SimCLR (scripts/13_train_simclr.py --aug-set <name>).
+#
+# Each set is an ordered pipeline applied INDEPENDENTLY to the two views of an image.  The first op is the crop
+# (random_resized_crop or rotated_resized_crop, output size = --crop-size).  ``p`` = probability per view.  Ops
+# that need a tensor (sobel, laplacian, high_pass, edge_enhance, patch_shuffle, gaussian_noise, random_erasing) run
+# after an automatic PIL -> tensor conversion; the result is normalised with ImageNet mean/std.  Op classes and
+# their parameters: src/augmentations/ops.py.   Preview of all sets: scripts/14_preview_augmentations.py.
+#
+# `description` / `intent` are copied into runs/<run>/config.json and the README table.
+
+baseline:
+  description: "Standard SimCLR v1 recipe (Chen et al. 2020), strength 1.0"
+  intent: "Reference set: crop + flip + colour jitter + grayscale + blur."
+  ops:
+    - {op: random_resized_crop, scale: [0.08, 1.0]}
+    - {op: hflip, p: 0.5}
+    - {op: color_jitter, brightness: 0.8, contrast: 0.8, saturation: 0.8, hue: 0.2, p: 0.8}
+    - {op: grayscale, p: 0.2}
+    - {op: gaussian_blur, sigma: [0.1, 2.0], p: 0.5}
+
+color_heavy:
+  description: "Very strong colour destruction"
+  intent: "Colour jitter at ~2x strength on every view, channel shuffle/drop, frequent grayscale and solarize/posterize: the representation should become (more) invariant to palette and colour."
+  ops:
+    - {op: random_resized_crop, scale: [0.08, 1.0]}
+    - {op: hflip, p: 0.5}
+    - {op: color_jitter, brightness: 0.9, contrast: 0.9, saturation: 0.9, hue: 0.5, p: 1.0}
+    - {op: channel_shuffle, p: 0.5}
+    - {op: channel_drop, two_p: 0.3, p: 0.3}
+    - {op: grayscale, p: 0.5}
+    - {op: solarize, threshold: [32, 224], p: 0.5}
+    - {op: posterize, bits: [2, 5], p: 0.3}
+    - {op: gaussian_blur, sigma: [0.1, 2.0], p: 0.5}
+
+edge_texture:
+  description: "Edge / texture emphasis with global shape destruction"
+  intent: "Small 'local texture' crops (5-40 % area), weak colour jitter, sharpen or strong blur on 50 % of the views, and one of {Sobel edge map, Laplacian edge map, high-pass, edge-enhance} on 50 %, patch shuffle on 50 %: the representation should rely on edge/texture statistics rather than layout and palette."
+  ops:
+    - {op: random_resized_crop, scale: [0.05, 0.4]}
+    - {op: hflip, p: 0.5}
+    - {op: color_jitter, brightness: 0.4, contrast: 0.4, saturation: 0.4, hue: 0.1, p: 0.8}
+    - {op: grayscale, p: 0.2}
+    - op: one_of                 # PIL group: sharpen or strong blur
+      p: 0.5
+      ops:
+        - {op: sharpen, radius: [1.0, 3.0], percent: [150, 500]}
+        - {op: gaussian_blur, sigma: [2.0, 6.0]}
+    - op: one_of
+      p: 0.5
+      weights: [1, 1, 1, 1]
+      ops:
+        - {op: sobel, p: 1.0}
+        - {op: laplacian, p: 1.0}
+        - {op: high_pass, sigma: 3.0, gain: 3.0, p: 1.0}
+        - {op: edge_enhance, alpha: [1.0, 3.0], p: 1.0}
+    - {op: patch_shuffle, grids: [2, 4], p: 0.5}
+
+rotation:
+  description: "Full rotation invariance (0-360 deg) + both flips"
+  intent: "Crop rotated by a uniform angle in [0, 360) (no empty corners), horizontal and vertical flips, otherwise the baseline appearance augmentations: the representation should be rotation invariant."
+  ops:
+    - {op: rotated_resized_crop, scale: [0.08, 1.0], degrees: [0, 360]}
+    - {op: hflip, p: 0.5}
+    - {op: vflip, p: 0.5}
+    - {op: color_jitter, brightness: 0.8, contrast: 0.8, saturation: 0.8, hue: 0.2, p: 0.8}
+    - {op: grayscale, p: 0.2}
+    - {op: gaussian_blur, sigma: [0.1, 2.0], p: 0.5}
+
+geometry_heavy:
+  description: "Strong geometry (extreme crops, perspective, shear, rotation)"
+  intent: "Very aggressive crop scale (2-100 %), perspective warp, shear and +-30 deg rotation on top of the baseline appearance augmentations: the representation should become invariant to viewpoint/layout."
+  ops:
+    - {op: random_resized_crop, scale: [0.02, 1.0], ratio: [0.5, 2.0]}
+    - {op: hflip, p: 0.5}
+    - {op: rotate, degrees: 30, p: 0.5}
+    - {op: perspective, distortion: 0.5, p: 0.7}
+    - {op: shear, degrees: 20, p: 0.5}
+    - {op: color_jitter, brightness: 0.8, contrast: 0.8, saturation: 0.8, hue: 0.2, p: 0.8}
+    - {op: grayscale, p: 0.2}
+    - {op: gaussian_blur, sigma: [0.1, 2.0], p: 0.5}
+
+no_color:
+  description: "Always grayscale"
+  intent: "Every view is converted to grayscale (brightness/contrast jitter only): the representation cannot use colour at all."
+  ops:
+    - {op: random_resized_crop, scale: [0.08, 1.0]}
+    - {op: hflip, p: 0.5}
+    - {op: color_jitter, brightness: 0.8, contrast: 0.8, saturation: 0.0, hue: 0.0, p: 0.8}
+    - {op: grayscale, p: 1.0}
+    - {op: gaussian_blur, sigma: [0.1, 2.0], p: 0.5}
+
+blur_heavy:
+  description: "Strong blur on every view"
+  intent: "Gaussian blur with sigma 2-8 px (at 224 px) on every view plus noise: fine texture/edges are destroyed, so the representation must use colour and low-frequency layout."
+  ops:
+    - {op: random_resized_crop, scale: [0.08, 1.0]}
+    - {op: hflip, p: 0.5}
+    - {op: color_jitter, brightness: 0.8, contrast: 0.8, saturation: 0.8, hue: 0.2, p: 0.8}
+    - {op: grayscale, p: 0.2}
+    - {op: gaussian_blur, sigma: [2.0, 8.0], p: 1.0}
+    - {op: gaussian_noise, std: [0.02, 0.08], p: 0.3}
+
+crop_only:
+  description: "Crop + flip only (no photometric augmentation)"
+  intent: "Control: without colour jitter/grayscale/blur the colour histogram is a shortcut for the contrastive task, so the representation should be strongly colour-driven."
+  ops:
+    - {op: random_resized_crop, scale: [0.08, 1.0]}
+    - {op: hflip, p: 0.5}

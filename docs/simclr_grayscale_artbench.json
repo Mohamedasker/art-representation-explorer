@@ -1,0 +1,83 @@
+{
+ "imagenet": {
+  "lin_colour_colour": 0.5172500014305115,
+  "lin_gray_gray": 0.49825000762939453,
+  "lin_colour_to_gray": 0.4622499942779541,
+  "knn_colour_colour": 0.48750001192092896,
+  "knn_gray_gray": 0.4819999933242798,
+  "cos_colour_vs_gray": 0.9503820538520813,
+  "gray_drop_lin": 0.018999993801116943
+ },
+ "baseline": {
+  "lin_colour_colour": 0.5217499732971191,
+  "lin_gray_gray": 0.5317500233650208,
+  "lin_colour_to_gray": 0.5162500143051147,
+  "knn_colour_colour": 0.5392500162124634,
+  "knn_gray_gray": 0.5339999794960022,
+  "cos_colour_vs_gray": 0.991508960723877,
+  "gray_drop_lin": -0.010000050067901611
+ },
+ "color_heavy": {
+  "lin_colour_colour": 0.484250009059906,
+  "lin_gray_gray": 0.4880000054836273,
+  "lin_colour_to_gray": 0.4894999861717224,
+  "knn_colour_colour": 0.5095000267028809,
+  "knn_gray_gray": 0.5065000057220459,
+  "cos_colour_vs_gray": 0.9976203441619873,
+  "gray_drop_lin": -0.0037499964237213135
+ },
+ "edge_texture": {
+  "lin_colour_colour": 0.5174999833106995,
+  "lin_gray_gray": 0.5022500157356262,
+  "lin_colour_to_gray": 0.4984999895095825,
+  "knn_colour_colour": 0.49924999475479126,
+  "knn_gray_gray": 0.48649999499320984,
+  "cos_colour_vs_gray": 0.9840242862701416,
+  "gray_drop_lin": 0.015249967575073242
+ },
+ "rotation": {
+  "lin_colour_colour": 0.503250002861023,
+  "lin_gray_gray": 0.47475001215934753,
+  "lin_colour_to_gray": 0.4645000100135803,
+  "knn_colour_colour": 0.4909999966621399,
+  "knn_gray_gray": 0.4754999876022339,
+  "cos_colour_vs_gray": 0.9631869792938232,
+  "gray_drop_lin": 0.028499990701675415
+ },
+ "geometry_heavy": {
+  "lin_colour_colour": 0.515250027179718,
+  "lin_gray_gray": 0.4959999918937683,
+  "lin_colour_to_gray": 0.48249998688697815,
+  "knn_colour_colour": 0.5005000233650208,
+  "knn_gray_gray": 0.49050000309944153,
+  "cos_colour_vs_gray": 0.9244856238365173,
+  "gray_drop_lin": 0.019250035285949707
+ },
+ "no_color": {
+  "lin_colour_colour": 0.46175000071525574,
+  "lin_gray_gray": 0.5272499918937683,
+  "lin_colour_to_gray": 0.45875000953674316,
+  "knn_colour_colour": 0.4269999861717224,
+  "knn_gray_gray": 0.5270000100135803,
+  "cos_colour_vs_gray": 0.5800689458847046,
+  "gray_drop_lin": -0.06549999117851257
+ },
+ "blur_heavy": {
+  "lin_colour_colour": 0.421750009059906,
+  "lin_gray_gray": 0.4047499895095825,
+  "lin_colour_to_gray": 0.3610000014305115,
+  "knn_colour_colour": 0.44325000047683716,
+  "knn_gray_gray": 0.4165000021457672,
+  "cos_colour_vs_gray": 0.9220511317253113,
+  "gray_drop_lin": 0.017000019550323486
+ },
+ "crop_only": {
+  "lin_colour_colour": 0.41749998927116394,
+  "lin_gray_gray": 0.398499995470047,
+  "lin_colour_to_gray": 0.14000000059604645,
+  "knn_colour_colour": 0.421999990940094,
+  "knn_gray_gray": 0.2955000102519989,
+  "cos_colour_vs_gray": 0.08597951382398605,
+  "gray_drop_lin": 0.018999993801116943
+ }
+}

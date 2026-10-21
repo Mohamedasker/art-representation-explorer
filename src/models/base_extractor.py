@@ -61,6 +61,15 @@ class RepresentationBundle:
     # ── derived properties ────────────────────────────────────────────────────
 
     @property
+    def splits(self) -> np.ndarray:
+        """Per-sample dataset split ("train" / "test" / ""), read from the image paths
+        (``data/<dataset>/<split>/<style>/<file>``) — so merged files stay unambiguous."""
+        def one(p: str) -> str:
+            parts = Path(str(p)).parts
+            return next((s for s in ("train", "test") if s in parts), "")
+        return np.array([one(p) for p in self.paths], dtype=str)
+
+    @property
     def n_samples(self) -> int:
         return len(self.vectors)
 
@@ -102,6 +111,7 @@ class RepresentationBundle:
             labels=self.labels.astype(np.int64),
             label_names=self.label_names.astype(str),
             paths=self.paths.astype(str),
+            split=self.splits,
             model_name=np.array(self.model_name, dtype=str),
             layer_name=np.array(self.layer_name, dtype=str),
             metadata_json=np.array(json.dumps(self.metadata), dtype=str),
