@@ -1,0 +1,68 @@
+{
+ "baseline": {
+  "conv1_chroma_over_luma_energy": 2.307630777359009,
+  "colour_input_R2": 0.29693034291267395,
+  "colour_input_R2_sat": 0.5173157453536987,
+  "colour_input_R2_bright": 0.8700188398361206,
+  "colour_input_R2_hue": 0.20876659452915192,
+  "gray_input_R2": 0.1745384931564331,
+  "gray_input_R2_sat": 0.2916419506072998,
+  "gray_input_R2_bright": 0.8595754504203796,
+  "gray_input_R2_hue": 0.08541178703308105
+ },
+ "color_heavy": {
+  "conv1_chroma_over_luma_energy": 1.789150357246399,
+  "colour_input_R2": 0.12821435928344727,
+  "colour_input_R2_sat": 0.24125325679779053,
+  "colour_input_R2_bright": 0.6875747442245483,
+  "colour_input_R2_hue": 0.05350331962108612,
+  "gray_input_R2": 0.1251838058233261,
+  "gray_input_R2_sat": 0.22932368516921997,
+  "gray_input_R2_bright": 0.6942823529243469,
+  "gray_input_R2_hue": 0.050379540771245956
+ },
+ "no_color": {
+  "conv1_chroma_over_luma_energy": 2.2645065784454346,
+  "colour_input_R2": 0.5704095959663391,
+  "colour_input_R2_sat": 0.7978157997131348,
+  "colour_input_R2_bright": 0.8658195734024048,
+  "colour_input_R2_hue": 0.5123189091682434,
+  "gray_input_R2": 0.17429377138614655,
+  "gray_input_R2_sat": 0.3072645664215088,
+  "gray_input_R2_bright": 0.8632673621177673,
+  "gray_input_R2_hue": 0.08296660333871841
+ },
+ "crop_only": {
+  "conv1_chroma_over_luma_energy": 3.1120026111602783,
+  "colour_input_R2": 0.7808151245117188,
+  "colour_input_R2_sat": 0.9323342442512512,
+  "colour_input_R2_bright": 0.9191017746925354,
+  "colour_input_R2_hue": 0.748614490032196,
+  "gray_input_R2": 0.1995699405670166,
+  "gray_input_R2_sat": 0.36043280363082886,
+  "gray_input_R2_bright": 0.9825497269630432,
+  "gray_input_R2_hue": 0.09469851851463318
+ },
+ "imagenet": {
+  "conv1_chroma_over_luma_energy": 1.0756570100784302,
+  "colour_input_R2": 0.3279127776622772,
+  "colour_input_R2_sat": 0.7367597818374634,
+  "colour_input_R2_bright": 0.8974618315696716,
+  "colour_input_R2_hue": 0.21920210123062134,
+  "gray_input_R2": 0.05552869662642479,
+  "gray_input_R2_sat": 0.21368080377578735,
+  "gray_input_R2_bright": 0.8844643831253052,
+  "gray_input_R2_hue": -0.054147738963365555
+ },
+ "random_init": {
+  "conv1_chroma_over_luma_energy": 3.0519771575927734,
+  "colour_input_R2": 0.4789116084575653,
+  "colour_input_R2_sat": 0.7928714156150818,
+  "colour_input_R2_bright": 0.9739360809326172,
+  "colour_input_R2_hue": 0.3890244662761688,
+  "gray_input_R2": 0.1506398320198059,
+  "gray_input_R2_sat": 0.28801047801971436,
+  "gray_input_R2_bright": 0.9795888066291809,
+  "gray_input_R2_hue": 0.04327097162604332
+ }
+}

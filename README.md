@@ -230,8 +230,13 @@ each run's `config.json` stores the set's description and op list. Every view = 
 | `blur_heavy` | RRC 0.08-1 | flip; baseline colour; **blur sigma 2-8 p 1.0**; noise 0.3 | destroys fine texture/edges; colour + low-frequency layout remain |
 | `crop_only` | RRC 0.08-1 | flip only | control: colour histogram becomes a shortcut |
 
+Quantitative comparison of the variants (`scripts/17_compare_simclr.py`, `18_investigate_nocolor.py`, `19_grayscale_eval.py`; results in `docs/`):
+colour / texture predictability from the embedding, invariance to grayscale / hue / rotation / blur, CKA to the baseline
+(`docs/simclr_comparison_<dataset>.md`, `docs/simclr_invariance_<dataset>.md`), why the always-grayscale model still encodes colour
+(`docs/simclr_nocolor_investigation_artbench.md`) and style accuracy under grayscale input (`docs/simclr_grayscale_<dataset>.md`).
+
 Training details of every run: `runs/<stamp>_simclr_<dataset>_<aug set>/` (config.json, metrics.jsonl, views/, checkpoints/, status.json,
-simclr_final.pt). Results table (run dir, wandb run, probe accuracy): see `docs/simclr_runs.md` once the runs are done.
+simclr_final.pt). Results table (run dir, wandb run, probe accuracy): `docs/simclr_runs.md`.
 
 ---
 
