@@ -12,6 +12,15 @@ ap.add_argument("--runs-dir", default="runs")
 ap.add_argument("--out", default="docs/simclr_runs.md")
 a = ap.parse_args()
 
+def _base_url() -> str | None:          # https://wandb.ai/<entity>/<project>/runs/ taken from any run that logged online
+    for f in sorted(Path(a.runs_dir).glob("*_simclr_*/wandb_info.json")):
+        u = json.loads(f.read_text()).get("url")
+        if u:
+            return u.rsplit("/", 1)[0] + "/"
+    return None
+
+
+base_url = _base_url()
 rows = []
 for d in sorted(Path(a.runs_dir).glob("*_simclr_*")):
     cfg_f = d / "config.json"
@@ -27,7 +36,9 @@ for d in sorted(Path(a.runs_dir).glob("*_simclr_*")):
             if "val/knn_acc" in m:
                 last = m
     wb = json.loads((d / "wandb_info.json").read_text()) if (d / "wandb_info.json").exists() else {}
-    url = wb.get("url") or (f"offline `{wb['id']}` (sync pending)" if wb else "-")
+    synced = wb and any(d.glob("wandb/offline-run-*/*.synced"))     # `wandb sync` marks the run dir
+    url = wb.get("url") or (f"{base_url}{wb['id']}" if wb and synced and base_url
+                            else f"offline `{wb['id']}` (sync pending)" if wb else "-")
     ep = (last.get("step", st.get("step", 0)) or 0) / cfg["steps_per_epoch"]
     rows.append((cfg["dataset"], cfg["aug_set"], d.name, f"{st.get('epochs', ep):.0f}/{cfg['args']['epochs']}",
                  st.get("status", "running/queued"), last.get("val/knn_acc"), last.get("val/linear_acc"), url))
