@@ -30,6 +30,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from src.metadata import attributes as A
 from src.metadata import clip_concepts as C
+from src.metadata import imagenet_labels as IL
 from src.metadata import pixel_features as P
 from src.models.base_extractor import RepresentationBundle
 
@@ -157,6 +158,8 @@ def main() -> None:
         out = REPO_ROOT / args.out_dir / f"{ds}_{split}.npz"
         A.save_attributes(out, paths, defs, arrays)
         print(f"  wrote {out}  ({len(defs)} attributes)")
+        if IL.add_to_attribute_file(out, ds):          # ImageNet classes by CLIP zero-shot (scripts/17_label_imagenet.py)
+            print("  + ImageNet class attributes")
 
 
 if __name__ == "__main__":
