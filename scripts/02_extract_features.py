@@ -52,11 +52,22 @@ Usage examples
     python scripts/02_extract_features.py --model vit_supervised --checkpoint runs/<run>/vit_final.pt \\
         --dataset wikiart --split all
 
+# Autoregressive model (VQ tokens + GPT, 128 px; scripts/21_train_vq.py, 23_train_ar.py): mean over the 256 token positions
+# of the hidden states of one intermediate GPT block (the run's probed layer, scripts/24_probe_ar_layers.py, or --ar-layer),
+# 1024-D -> <dataset>_ar_gpt_*; and the tokenizer-only baseline (quantised latents pooled to 4x4, 512-D) -> <dataset>_ar_vq_*:
+    python scripts/02_extract_features.py --model ar_gpt --checkpoint runs/<run>/ar_final.pt --dataset artbench --split all
+    python scripts/02_extract_features.py --model ar_vq --checkpoint runs/<run>/vq_final.pt --dataset artbench --split all
+
 # SimCLR ResNet-50 (2048-D pooled encoder output): the published ImageNet SimCLR v1 weights (frozen), and one trained
 # with scripts/13_train_simclr.py (-> representations/<dataset>_simclr_<train dataset>_<aug set>_{train,test}.npz):
     python scripts/02_extract_features.py --model simclr_imagenet --dataset artbench --split both
     python scripts/02_extract_features.py --model simclr --checkpoint runs/<run>/simclr_final.pt \\
         --dataset artbench --split both
+
+# StyleGAN2 trained with scripts/20_train_gan.py (128 px): discriminator penultimate features (512-D) -> <dataset>_gan_disc_*;
+# the inversion encoder of scripts/25_train_gan_encoder.py (latent w, 512-D) -> <dataset>_gan_enc_*:
+    python scripts/02_extract_features.py --model gan_disc --checkpoint runs/<run>/gan_final.pt --dataset artbench --split all
+    python scripts/02_extract_features.py --model gan_enc --checkpoint runs/<run>/gan_enc_final.pt --dataset artbench --split all
 
 # Custom checkpoint (ResNet fine-tuned on ArtBench):
     python scripts/02_extract_features.py \\
@@ -85,7 +96,7 @@ from src.models.base_extractor import RepresentationBundle
 # ── Model registry ────────────────────────────────────────────────────────────
 
 def _get_extractor(model_id: str, checkpoint, batch_size: int, device: str | None, ae_pool: int = 4,
-                   mae_pool: str = "mean", vit_pool: str = "cls"):
+                   mae_pool: str = "mean", vit_pool: str = "cls", ar_layer: int | None = None):
     """Resolve model ID string to an extractor instance."""
     from src.models.clip_extractor import CLIP_PRESETS, CLIPExtractor
     from src.models.ssl_extractor import SSL_MODELS, SSLExtractor
@@ -100,6 +111,11 @@ def _get_extractor(model_id: str, checkpoint, batch_size: int, device: str | Non
         return MAEExtractor(checkpoint=checkpoint if model_id == "mae" else None, pool=mae_pool,
                             batch_size=batch_size, device=device)
 
+    if model_id in ("ar_gpt", "ar_vq"):
+        from src.models.ar_extractor import AutoregressiveExtractor
+        return AutoregressiveExtractor(checkpoint=checkpoint, kind=model_id[3:], layer=ar_layer,
+                                       batch_size=batch_size, device=device)
+
     if model_id in ("vit_supervised", "vit_imagenet"):
         from src.models.vit_extractor import ViTExtractor
         return ViTExtractor(checkpoint=checkpoint if model_id == "vit_supervised" else None, pool=vit_pool,
@@ -109,6 +125,10 @@ def _get_extractor(model_id: str, checkpoint, batch_size: int, device: str | Non
         from src.models.simclr_extractor import SimCLRExtractor
         return SimCLRExtractor(checkpoint=checkpoint if model_id == "simclr" else None,
                                batch_size=batch_size, device=device)
+
+    if model_id in ("gan_disc", "gan_enc"):
+        from src.models.gan_extractor import GanExtractor
+        return GanExtractor(checkpoint=checkpoint, kind=model_id[4:], batch_size=batch_size, device=device)
 
     if model_id == "cnn_supervised":
         from src.models.supervised_extractor import SupervisedCNNExtractor
@@ -193,6 +213,12 @@ def main() -> None:
         help="--model vit_imagenet / vit_supervised only: final-layer CLS token (768-D), mean patch token, or both.",
     )
     parser.add_argument(
+        "--ar-layer",
+        type=int,
+        default=None,
+        help="--model ar_gpt only: GPT block whose hidden states are mean-pooled (default: best_layer of the run's layer_probe.json).",
+    )
+    parser.add_argument(
         "--dataset",
         choices=["artbench", "wikiart"],
         default="artbench",
@@ -255,6 +281,7 @@ def main() -> None:
         ae_pool=args.ae_pool,
         mae_pool=args.mae_pool,
         vit_pool=args.vit_pool,
+        ar_layer=args.ar_layer,
     )
 
     # Build the transform from the extractor
