@@ -71,6 +71,10 @@ Usage examples
     python scripts/02_extract_features.py --model gan_disc --checkpoint runs/<run>/gan_final.pt --dataset artbench --split all
     python scripts/02_extract_features.py --model gan_enc --checkpoint runs/<run>/gan_enc_final.pt --dataset artbench --split all
 
+# DINO v1 ViT-B/16 trained with scripts/29_train_dino.py (teacher CLS token, 768-D, like the pretrained dino_vitb16;
+# -> <dataset>_dino_adapt_<train dataset>_* (ImageNet-initialised) / <dataset>_dino_scratch_<train dataset>_*):
+    python scripts/02_extract_features.py --model dino_train --checkpoint runs/<run>/dino_final.pt --dataset artbench --split all
+
 # Custom checkpoint (ResNet fine-tuned on ArtBench):
     python scripts/02_extract_features.py \\
         --model resnet50 \\
@@ -122,6 +126,10 @@ def _get_extractor(model_id: str, checkpoint, batch_size: int, device: str | Non
         from src.models.vit_extractor import ViTExtractor
         return ViTExtractor(checkpoint=checkpoint if model_id == "vit_supervised" else None, pool=vit_pool,
                             batch_size=batch_size, device=device)
+
+    if model_id == "dino_train":
+        from src.models.dino_train_extractor import DINOTrainedExtractor
+        return DINOTrainedExtractor(checkpoint=checkpoint, batch_size=batch_size, device=device)
 
     if model_id in ("simclr", "simclr_imagenet"):
         from src.models.simclr_extractor import SimCLRExtractor
