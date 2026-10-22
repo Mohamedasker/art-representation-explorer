@@ -300,7 +300,7 @@ window.addEventListener("keydown", e => {
 fetch(DATA + "index.json", { cache: "no-store" }).then(r => r.json()).then(m => {
   META = m;
   $("sub").textContent = `${m.images.length} held-out paintings · ${Object.keys(m.models).length} models`;
-  $("note").textContent = (m.note || "") + ". Sprites show the most varied channels of each layer; their grey values are normalised per channel. For the transformers the channels are the 768 embedding dimensions of the patch tokens laid out on their patch grid (16x16 for DINOv2, 14x14 for the MAEs, 7x7 for CLIP). Each model is shown exactly the part of the painting it sees: DINOv2 and the MAEs the central 224 of 256 px, the others the whole square.";
+  $("note").textContent = (m.note || "") + ". Sprites show the most varied channels of each layer; their grey values are normalised per channel. For the transformers the channels are the 768 embedding dimensions of the patch tokens laid out on their patch grid (16x16 for DINOv2, 14x14 for the MAEs and ViT-B/16s, 7x7 for CLIP). Each model is shown exactly the part of the painting it sees: DINOv2, the MAEs and ViT-B/16s the central 224 of 256 px, the others the whole square.";
   const h = (location.hash || "").slice(1).split("|"), im = h[0] && m.images.find(i => i.id === h[0]);
   if (im && !isHidden(im)) { cur.id = im.id; cur.ds = im.dataset; if (m.models[h[1]]) cur.model = h[1]; if (h[2]) cur.layer = h[2]; }
   if (m.images.some(i => i.nsfw === 1)) {

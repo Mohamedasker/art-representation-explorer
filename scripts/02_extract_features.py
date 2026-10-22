@@ -136,15 +136,21 @@ MODEL_SLUGS = {"resnet50": "resnet50_imagenet"}      # file-name slug for model 
 def _update_manifest(out_path, bundle, args, split: str) -> None:
     """Keep representations/manifest.json up to date (what each saved .npz contains)."""
     import datetime
+    import fcntl
     import json
+    import os
     mf = Path("representations/manifest.json")
-    data = json.loads(mf.read_text()) if mf.exists() else {}
-    data[Path(out_path).name] = {
-        "dataset": args.dataset, "split": split, "n": int(bundle.n_samples), "dim": int(bundle.dim),
-        "model_name": bundle.model_name, "layer": bundle.layer_name, "model_arg": args.model,
-        "checkpoint": args.checkpoint, "saved_at": datetime.datetime.now().isoformat(timespec="seconds"),
-    }
-    mf.write_text(json.dumps(data, indent=1, sort_keys=True))
+    with open(mf.with_suffix(".lock"), "w") as lock:      # parallel extraction processes share the manifest
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        data = json.loads(mf.read_text()) if mf.exists() else {}
+        data[Path(out_path).name] = {
+            "dataset": args.dataset, "split": split, "n": int(bundle.n_samples), "dim": int(bundle.dim),
+            "model_name": bundle.model_name, "layer": bundle.layer_name, "model_arg": args.model,
+            "checkpoint": args.checkpoint, "saved_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        }
+        tmp = mf.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=1, sort_keys=True))
+        os.replace(tmp, mf)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
