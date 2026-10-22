@@ -73,6 +73,12 @@ MODEL_INFO = [
     ("dino_vitb16", "DINO v1 ViT-B/16 (ImageNet-1k)", "Self-supervised",
      "The original DINO (self-distillation, no labels) trained on ImageNet-1k only; CLS token, 768-D. "
      "The ImageNet-1k counterpart of DINOv2, which was trained on the larger LVD-142M collection."),
+    ("gan_disc", "GAN (StyleGAN2): discriminator features", "Generative, adversarial",
+     "StyleGAN2 (128 px, adaptive augmentation) trained from scratch on ArtBench + WikiArt train. Penultimate "
+     "features of the discriminator (the 512-D layer before the real/fake logit) on every real painting."),
+    ("gan_enc", "GAN (StyleGAN2): inversion encoder", "Generative, adversarial (inverted generator)",
+     "A ResNet-34 encoder trained to invert the frozen StyleGAN2 generator (image -> latent w, reconstruction + "
+     "perceptual loss). The 512-D latent w of every painting."),
     ("dinov2", "DINOv2 ViT-B/14", "Self-supervised",
      "Pretrained with self-distillation on large image collections; no labels and no text."),
     ("clip", "CLIP ViT-B/32", "Language-supervised",
