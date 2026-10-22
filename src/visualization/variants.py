@@ -55,6 +55,10 @@ FAMILIES = [
     ("vit", "ViT-B/16 (supervised)", [("vit_imagenet", "ImageNet (frozen)"),
                                       ("vit_supervised", "trained here (from scratch)"),
                                       ("vit_supervised_ft", "ImageNet, fine-tuned on art labels")]),
+    ("ar", "Autoregressive transformer", [("ar_igpt", "iGPT (pixels, probed layer)"),
+                                          ("ar_gpt", "VQ tokens + GPT (probed layer)"),
+                                          ("ar_vq", "VQ tokenizer latents (baseline)")]),
+    ("gan", "GAN (StyleGAN2)", [("gan_disc", "discriminator features"), ("gan_enc", "inversion encoder (latent w)")]),
     ("dinov2", "DINOv2 ViT-B/14", [("dinov2", "Meta (LVD-142M)")]),
     ("clip", "CLIP ViT-B/32", [("clip", "OpenAI")]),
 ]

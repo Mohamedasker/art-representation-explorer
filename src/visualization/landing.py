@@ -60,6 +60,16 @@ MODEL_INFO = [
     ("vit_supervised", "ViT-B/16 (trained here)", "Supervised, in-domain",
      "ViT-B/16 trained from scratch on ArtBench + WikiArt to predict style, genre and artist (multi-task), "
      "like the ResNet-50. Final-layer CLS token, 768-D."),
+    ("ar_igpt", "Autoregressive transformer (iGPT, pixels)", "Generative, autoregressive",
+     "iGPT-style: a 24-layer GPT trained from scratch on ArtBench + WikiArt to predict the next pixel of 32x32 paintings "
+     "(each pixel = one of 512 palette colours, raster order). Mean over the 1024 pixel positions of the hidden states of "
+     "one middle layer (chosen with a style probe), 512-D."),
+    ("ar_gpt", "Autoregressive transformer (VQ tokens + GPT)", "Generative, autoregressive",
+     "VQ tokenizer (128 px -> 16x16 tokens) + GPT-style transformer trained from scratch on ArtBench + WikiArt with "
+     "next-token prediction. Mean over the token positions of the hidden states of one intermediate block (layer picked "
+     "with a style probe), 1024-D."),
+    ("ar_vq", "Autoregressive model (VQ tokenizer latents)", "Generative, autoregressive (tokenizer only)",
+     "Baseline without the transformer: the quantised latents of the VQ tokenizer, average-pooled to a 4x4 grid, 512-D."),
     ("dinov2", "DINOv2 ViT-B/14", "Self-supervised",
      "Pretrained with self-distillation on large image collections; no labels and no text."),
     ("clip", "CLIP ViT-B/32", "Language-supervised",

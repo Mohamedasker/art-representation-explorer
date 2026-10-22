@@ -52,6 +52,8 @@ Usage examples
     python scripts/02_extract_features.py --model vit_supervised --checkpoint runs/<run>/vit_final.pt \\
         --dataset wikiart --split all
 
+# iGPT (pixel-level GPT on a 512-colour palette, 32 px, scripts/27_train_igpt.py): same recipe -> <dataset>_ar_igpt_*:
+    python scripts/02_extract_features.py --model ar_igpt --checkpoint runs/<run>/checkpoints/best.pt --dataset artbench --split all
 # Autoregressive model (VQ tokens + GPT, 128 px; scripts/21_train_vq.py, 23_train_ar.py): mean over the 256 token positions
 # of the hidden states of one intermediate GPT block (the run's probed layer, scripts/24_probe_ar_layers.py, or --ar-layer),
 # 1024-D -> <dataset>_ar_gpt_*; and the tokenizer-only baseline (quantised latents pooled to 4x4, 512-D) -> <dataset>_ar_vq_*:
@@ -111,7 +113,7 @@ def _get_extractor(model_id: str, checkpoint, batch_size: int, device: str | Non
         return MAEExtractor(checkpoint=checkpoint if model_id == "mae" else None, pool=mae_pool,
                             batch_size=batch_size, device=device)
 
-    if model_id in ("ar_gpt", "ar_vq"):
+    if model_id in ("ar_igpt", "ar_gpt", "ar_vq"):
         from src.models.ar_extractor import AutoregressiveExtractor
         return AutoregressiveExtractor(checkpoint=checkpoint, kind=model_id[3:], layer=ar_layer,
                                        batch_size=batch_size, device=device)
@@ -216,7 +218,7 @@ def main() -> None:
         "--ar-layer",
         type=int,
         default=None,
-        help="--model ar_gpt only: GPT block whose hidden states are mean-pooled (default: best_layer of the run's layer_probe.json).",
+        help="--model ar_igpt / ar_gpt only: GPT block whose hidden states are mean-pooled (default: best_layer of the run's layer_probe.json).",
     )
     parser.add_argument(
         "--dataset",

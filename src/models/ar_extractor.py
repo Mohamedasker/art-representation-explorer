@@ -7,6 +7,11 @@ Embeddings from the autoregressive model (VQ tokenizer + GPT transformer, ``src/
   states of ONE intermediate block are averaged over the 256 positions after a non-affine LayerNorm -> 1024-D (iGPT-style
   intermediate-layer features).  The block is the ``best_layer`` of the run's ``layer_probe.json``
   (scripts/24_probe_ar_layers.py: kNN / logistic-regression style accuracy per layer), or ``--ar-layer N``.
+* ``--model ar_igpt --checkpoint runs/<run>/ar_final.pt`` (slug ``ar_igpt``, the primary model): iGPT-style pixel model
+  (``scripts/27_train_igpt.py``): the 128 px centre crop is average-pooled to 32 x 32, every pixel replaced by its nearest colour
+  of the run's 512-colour palette (1024 tokens), the real tokens go through the transformer (eval mode, no sampling, prefix =
+  "no label") and the hidden states of ONE intermediate block are averaged over the 1024 positions after a non-affine LayerNorm
+  -> 512-D.  The block is probed the same way as for ``ar_gpt``.
 * ``--model ar_vq --checkpoint runs/<run>/vq_final.pt`` (slug ``ar_vq``): tokenizer-only baseline -- the quantised
   latents (codebook vectors of the 256 tokens, 32-D, unit norm) average-pooled to a 4 x 4 grid -> 512-D (the same
   spatial pooling as the autoencoder baseline).
@@ -24,6 +29,7 @@ import torch.nn.functional as F
 
 from .ar_data import eval_transform
 from .base_extractor import BaseExtractor
+from .igpt_data import quantize, shrink
 from .image_gpt import GPTConfig, ImageGPT
 from .vq_tokenizer import VQConfig, VQTokenizer
 
@@ -55,8 +61,8 @@ def probed_layer(run_dir: Path) -> int | None:
 class AutoregressiveExtractor(BaseExtractor):
     def __init__(self, checkpoint: str | Path, kind: str = "gpt", layer: int | None = None, **kwargs) -> None:
         super().__init__(**kwargs)
-        if kind not in ("gpt", "vq"):
-            raise ValueError(f"kind must be gpt|vq, got {kind!r}")
+        if kind not in ("gpt", "vq", "igpt"):
+            raise ValueError(f"kind must be gpt|vq|igpt, got {kind!r}")
         if checkpoint is None:
             raise ValueError("--checkpoint is required (ar_final.pt of scripts/23_train_ar.py / vq_final.pt of scripts/21_train_vq.py)")
         self.kind, self.checkpoint = kind, Path(checkpoint)
@@ -74,6 +80,10 @@ class AutoregressiveExtractor(BaseExtractor):
         self._step = ck.get("step")
         if self.layer is None:
             self.layer = probed_layer(self._run) or gpt.cfg.n_layer // 2
+        if self.kind == "igpt":
+            self.palette = torch.tensor(ck["info"]["palette"], device=self.device)
+            self.res = int(ck["info"]["res"])
+            return gpt
         tok = Path(ck["info"]["tokenizer"])
         self.vq = load_vq(tok if tok.exists() else self._run.parent / tok.parent.name / tok.name, self.device)
         return gpt
@@ -83,12 +93,15 @@ class AutoregressiveExtractor(BaseExtractor):
 
     @torch.no_grad()
     def _forward(self, batch: torch.Tensor) -> torch.Tensor:
+        if self.kind == "igpt":                  # nearest palette colour in fp32 (bf16 autocast would change the tokens)
+            ids = quantize(shrink((batch * 255).round() / 255, self.res), self.palette)
         x = batch * 2 - 1
         with torch.autocast(self.device.type, dtype=torch.bfloat16, enabled=self.device.type == "cuda"):
             if self.kind == "vq":
                 z = self.model.quantized_latents(x)                           # (B, 32, 16, 16)
                 return F.adaptive_avg_pool2d(z.float(), 4).flatten(1)
-            ids = self.vq.encode(x).flatten(1)
+            if self.kind == "gpt":
+                ids = self.vq.encode(x).flatten(1)
             return self.model.pooled_hidden(ids, [self.layer])[self.layer].float()
 
     @property
@@ -100,7 +113,7 @@ class AutoregressiveExtractor(BaseExtractor):
     def model_name(self) -> str:
         self.setup()
         step = f"step{self._step}" if self._step is not None else "?"
-        lay = f"_layer{self.layer}" if self.kind == "gpt" else ""
+        lay = f"_layer{self.layer}" if self.kind != "vq" else ""
         return f"ar_{self.kind}_{self._run.name}_{step}{lay}"
 
     @property
@@ -108,4 +121,4 @@ class AutoregressiveExtractor(BaseExtractor):
         if self.kind == "vq":
             return "vq_quantised_latents_pooled_4x4"
         self.setup()
-        return f"gpt_block{self.layer}_mean_hidden"
+        return f"{'igpt' if self.kind == 'igpt' else 'gpt'}_block{self.layer}_mean_hidden"

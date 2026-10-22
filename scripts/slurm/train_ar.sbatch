@@ -4,11 +4,11 @@
 #
 #   TOKENIZER=runs/<stamp>_vq_artbench_wikiart/vq_final.pt sbatch scripts/slurm/train_ar.sbatch        # devel: smoke test + run
 #   RESUME=runs/<stamp>_ar_gpt_artbench_wikiart sbatch scripts/slurm/train_ar.sbatch
-#   TOKENIZER=... SKIP_SMOKE=1 CHAIN=1 NEXT_EMBED=1 TIME_LIMIT_MIN=1410 NEXT_TIME=24:00:00 sbatch --partition=dc-gpu --time=24:00:00 scripts/slurm/train_ar.sbatch
+#   TOKENIZER=... SKIP_SMOKE=1 CHAIN=1 TIME_LIMIT_MIN=1410 NEXT_TIME=24:00:00 sbatch --partition=dc-gpu --time=24:00:00 scripts/slurm/train_ar.sbatch
 #
 # Environment knobs: TOKENIZER (new run), RESUME, AR_EPOCHS (default 60), AR_RUN_NAME, AR_TRAIN_ARGS (extra args for scripts/23_train_ar.py), TIME_LIMIT_MIN (default 108), SKIP_SMOKE=1,
-# CHAIN=1 (resubmit at the time limit; NEXT_TIME = its --time), NEXT_EMBED=1 (after a finished run: probe the layers on one
-# GPU, then submit scripts/slurm/embed_ar.sbatch), WANDB_MODE=offline|online.   Devel QOS: 2 running jobs/user, 2 h wall.
+# CHAIN=1 (resubmit at the time limit; NEXT_TIME = its --time; a finished run is followed by the layer probe, scripts/24_probe_ar_layers.py),
+# WANDB_MODE=offline|online.  Then: AR_RUN=<run> sbatch scripts/slurm/embed_ar.sbatch   Devel QOS: 2 running jobs/user, 2 h wall.
 #SBATCH --account=jinm16
 #SBATCH --partition=dc-gpu-devel
 #SBATCH --nodes=1
@@ -57,11 +57,10 @@ echo "run=$RUN_DIR status=$STATUS"
 if [[ "${CHAIN:-0}" == "1" && "$STATUS" == "time_limit" ]]; then
     NEXT=$(sbatch --parsable --partition="${SLURM_JOB_PARTITION:-dc-gpu}" --time="${NEXT_TIME:-24:00:00}" \
            --job-name="${SLURM_JOB_NAME:-ar_gpt}" \
-           --export=ALL,RESUME="$RUN_DIR",CHAIN=1,NEXT_EMBED="${NEXT_EMBED:-0}",TIME_LIMIT_MIN="$TIME_LIMIT_MIN",NEXT_TIME="${NEXT_TIME:-24:00:00}" \
+           --export=ALL,RESUME="$RUN_DIR",CHAIN=1,TIME_LIMIT_MIN="$TIME_LIMIT_MIN",NEXT_TIME="${NEXT_TIME:-24:00:00}" \
            scripts/slurm/train_ar.sbatch)
     echo "chained next job $NEXT"
-elif [[ "$STATUS" == "finished" && "${NEXT_EMBED:-0}" == "1" ]]; then
+elif [[ "$STATUS" == "finished" ]]; then
     CUDA_VISIBLE_DEVICES=0 $PY scripts/24_probe_ar_layers.py --checkpoint "$RUN_DIR/checkpoints/best.pt"
-    NEXT=$(sbatch --parsable --export=ALL,AR_RUN="$RUN_DIR" scripts/slurm/embed_ar.sbatch)
-    echo "submitted embedding job $NEXT"
+    echo "layer probe written; next: AR_RUN=$RUN_DIR sbatch scripts/slurm/embed_ar.sbatch"
 fi

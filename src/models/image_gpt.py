@@ -137,9 +137,11 @@ class ImageGPT(nn.Module):
     @torch.no_grad()
     def generate(self, n: int, ds: int | torch.Tensor | None = None, style: int | torch.Tensor | None = None,
                  temperature: float = 1.0, top_k: int = 0, cfg_scale: float = 1.0, generator=None,
-                 device=None) -> torch.Tensor:
+                 device=None, prompt: torch.Tensor | None = None) -> torch.Tensor:
         """Sample ``n`` token grids (n, 256) in raster order.  ``ds`` / ``style`` = label ids (None = no label);
-        ``cfg_scale`` > 1 applies classifier-free guidance (logits = u + s (c - u)) against the unlabeled model."""
+        ``cfg_scale`` > 1 applies classifier-free guidance (logits = u + s (c - u)) against the unlabeled model.
+        ``prompt`` (n, k) = the first k tokens of every sequence (e.g. the upper half of a real image): they are kept and
+        the rest is sampled (completion)."""
         device = device or next(self.parameters()).device
 
         def lab(v, null):
@@ -150,10 +152,10 @@ class ImageGPT(nn.Module):
         dsv, stv = lab(ds, self.null_ds), lab(style, self.null_style)
         nulls = (torch.full_like(dsv, self.null_ds), torch.full_like(stv, self.null_style))
         guided = cfg_scale != 1.0 and (ds is not None or style is not None)
-        toks = torch.zeros(n, 0, dtype=torch.long, device=device)
+        toks = torch.zeros(n, 0, dtype=torch.long, device=device) if prompt is None else prompt.to(device).long()
         was_training = self.training
         self.eval()
-        for _ in range(self.cfg.n_tokens):
+        for _ in range(self.cfg.n_tokens - toks.shape[1]):
             def last_logits(d_, s_):
                 x = self._embed(toks, d_, s_)
                 for blk in self.blocks:

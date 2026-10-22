@@ -65,7 +65,7 @@ if [[ "${CHAIN:-0}" == "1" && "$STATUS" == "time_limit" ]]; then
 elif [[ "$STATUS" == "finished" && "${NEXT_AR:-0}" == "1" ]]; then
     CUDA_VISIBLE_DEVICES=0 $PY scripts/22_tokenize_ar.py --tokenizer "$RUN_DIR/vq_final.pt"
     NEXT=$(sbatch --parsable --partition="${SLURM_JOB_PARTITION:-dc-gpu}" --time="${NEXT_TIME:-24:00:00}" \
-           --job-name=ar_gpt --export=ALL,TOKENIZER="$RUN_DIR/vq_final.pt",CHAIN=1,NEXT_EMBED=1,SKIP_SMOKE="${SKIP_SMOKE:-0}",TIME_LIMIT_MIN="$TIME_LIMIT_MIN",NEXT_TIME="${NEXT_TIME:-24:00:00}" \
+           --job-name=ar_gpt --export=ALL,TOKENIZER="$RUN_DIR/vq_final.pt",CHAIN=1,SKIP_SMOKE="${SKIP_SMOKE:-0}",TIME_LIMIT_MIN="$TIME_LIMIT_MIN",NEXT_TIME="${NEXT_TIME:-24:00:00}" \
            scripts/slurm/train_ar.sbatch)
     echo "submitted GPT training $NEXT"
 fi

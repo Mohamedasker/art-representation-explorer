@@ -1,13 +1,15 @@
 #!/bin/bash
 # Autoregressive-model embeddings for both datasets: train + test split files + merged _all file, then the explorer pages.
 #
-#   * GPT hidden states (probed layer)     -> representations/<dataset>_ar_gpt_{train,test,all}.npz   (1024-D)
-#   * VQ tokenizer latents (4x4-pooled)    -> representations/<dataset>_ar_vq_{train,test,all}.npz    (512-D)
+#   * iGPT hidden states (probed layer)   -> representations/<dataset>_ar_igpt_{train,test,all}.npz  (512-D)   [IGPT_RUN]
+#   * VQ tokens + GPT hidden states        -> representations/<dataset>_ar_gpt_{train,test,all}.npz   (1024-D)  [AR_RUN]
+#   * VQ tokenizer latents (4x4-pooled)    -> representations/<dataset>_ar_vq_{train,test,all}.npz    (512-D)   [AR_RUN or VQ_RUN]
 #
-#   AR_RUN=runs/<stamp>_ar_gpt_artbench_wikiart VQ_RUN=runs/<stamp>_vq_artbench_wikiart sbatch scripts/slurm/embed_ar.sbatch
-#   (the GPT checkpoint is $AR_CKPT, default $AR_RUN/checkpoints/best.pt; the layer comes from $AR_RUN/layer_probe.json
-#    (scripts/24_probe_ar_layers.py) or AR_LAYER=N; VQ_RUN defaults to the tokenizer recorded in the GPT run; EXPLORER=0
-#    skips the page building)
+#   IGPT_RUN=runs/<stamp>_ar_igpt_artbench_wikiart AR_RUN=runs/<stamp>_ar_gpt_artbench_wikiart sbatch scripts/slurm/embed_ar.sbatch
+#   (every variable is optional, what is not given is skipped; the checkpoint is $IGPT_CKPT / $AR_CKPT, default
+#    <run>/checkpoints/best.pt (lowest validation loss); the layer comes from <run>/layer_probe.json
+#    (scripts/24_probe_ar_layers.py) or IGPT_LAYER=N / AR_LAYER=N; the tokenizer is the one recorded in the AR_RUN
+#    (or VQ_RUN=<vq run>); EXPLORER=0 skips the page building)
 #SBATCH --account=jinm16
 #SBATCH --partition=dc-gpu-devel
 #SBATCH --nodes=1
@@ -21,23 +23,25 @@
 set -uo pipefail
 cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")/../..}"
 export OMP_NUM_THREADS=4 HF_HUB_OFFLINE=1
-AR_RUN=${AR_RUN:?set AR_RUN=runs/<GPT run>}
-AR_CKPT=${AR_CKPT:-$AR_RUN/checkpoints/best.pt}
-if [[ -z "${VQ_RUN:-}" ]]; then
-    VQ_CKPT=$(.venv/bin/python -c "import json; print(json.load(open('$AR_RUN/config.json'))['info']['tokenizer'])")
-else
-    VQ_CKPT=$VQ_RUN/vq_final.pt
-fi
-echo "host=$(hostname) job=${SLURM_JOB_ID:-none} start=$(date -Is) gpt=$AR_CKPT vq=$VQ_CKPT"
-LAYER_ARG=""
-[[ -n "${AR_LAYER:-}" ]] && LAYER_ARG="--ar-layer $AR_LAYER"
+echo "host=$(hostname) job=${SLURM_JOB_ID:-none} start=$(date -Is)"
 EXTRACT=".venv/bin/python scripts/02_extract_features.py --split all --batch-size 128 --num-workers 30"
-
+VQ_CKPT=""
+if [[ -n "${VQ_RUN:-}" ]]; then
+    VQ_CKPT=$VQ_RUN/vq_final.pt
+elif [[ -n "${AR_RUN:-}" ]]; then
+    VQ_CKPT=$(.venv/bin/python -c "import json; print(json.load(open('$AR_RUN/config.json'))['info']['tokenizer'])")
+fi
 JOBS=()
 for ds in artbench wikiart; do
-    JOBS+=("--model ar_gpt --checkpoint $AR_CKPT $LAYER_ARG --dataset $ds")
-    JOBS+=("--model ar_vq --checkpoint $VQ_CKPT --dataset $ds")
+    if [[ -n "${IGPT_RUN:-}" ]]; then
+        JOBS+=("--model ar_igpt --checkpoint ${IGPT_CKPT:-$IGPT_RUN/checkpoints/best.pt} ${IGPT_LAYER:+--ar-layer $IGPT_LAYER} --dataset $ds")
+    fi
+    if [[ -n "${AR_RUN:-}" ]]; then
+        JOBS+=("--model ar_gpt --checkpoint ${AR_CKPT:-$AR_RUN/checkpoints/best.pt} ${AR_LAYER:+--ar-layer $AR_LAYER} --dataset $ds")
+    fi
+    [[ -n "$VQ_CKPT" ]] && JOBS+=("--model ar_vq --checkpoint $VQ_CKPT --dataset $ds")
 done
+echo "jobs: ${JOBS[*]}"
 PIDS=()
 for g in 0 1 2 3; do
     (for ((i = g; i < ${#JOBS[@]}; i += 4)); do
