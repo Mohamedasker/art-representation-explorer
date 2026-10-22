@@ -45,6 +45,13 @@ Usage examples
     python scripts/02_extract_features.py --model mae --checkpoint runs/<run>/mae_final.pt \\
         --dataset wikiart --split both        # -> representations/wikiart_mae_adapt_artbench_{train,test}.npz
 
+# Plain ViT-B/16 (final-layer CLS token, 768-D): ImageNet-1k supervised weights (frozen), and ViTs trained with
+# scripts/19_train_vit.py on the art labels (-> <dataset>_vit_supervised_* from scratch, <dataset>_vit_supervised_ft_*
+# fine-tuned from ImageNet):
+    python scripts/02_extract_features.py --model vit_imagenet --dataset artbench --split all
+    python scripts/02_extract_features.py --model vit_supervised --checkpoint runs/<run>/vit_final.pt \\
+        --dataset wikiart --split all
+
 # SimCLR ResNet-50 (2048-D pooled encoder output): the published ImageNet SimCLR v1 weights (frozen), and one trained
 # with scripts/13_train_simclr.py (-> representations/<dataset>_simclr_<train dataset>_<aug set>_{train,test}.npz):
     python scripts/02_extract_features.py --model simclr_imagenet --dataset artbench --split both
@@ -78,7 +85,7 @@ from src.models.base_extractor import RepresentationBundle
 # ── Model registry ────────────────────────────────────────────────────────────
 
 def _get_extractor(model_id: str, checkpoint, batch_size: int, device: str | None, ae_pool: int = 4,
-                   mae_pool: str = "mean"):
+                   mae_pool: str = "mean", vit_pool: str = "cls"):
     """Resolve model ID string to an extractor instance."""
     from src.models.clip_extractor import CLIP_PRESETS, CLIPExtractor
     from src.models.ssl_extractor import SSL_MODELS, SSLExtractor
@@ -91,6 +98,11 @@ def _get_extractor(model_id: str, checkpoint, batch_size: int, device: str | Non
     if model_id in ("mae", "mae_imagenet"):
         from src.models.mae_extractor import MAEExtractor
         return MAEExtractor(checkpoint=checkpoint if model_id == "mae" else None, pool=mae_pool,
+                            batch_size=batch_size, device=device)
+
+    if model_id in ("vit_supervised", "vit_imagenet"):
+        from src.models.vit_extractor import ViTExtractor
+        return ViTExtractor(checkpoint=checkpoint if model_id == "vit_supervised" else None, pool=vit_pool,
                             batch_size=batch_size, device=device)
 
     if model_id in ("simclr", "simclr_imagenet"):
@@ -169,6 +181,12 @@ def main() -> None:
         help="--model mae / mae_imagenet only: mean-pooled patch tokens (768-D), CLS token, or both.",
     )
     parser.add_argument(
+        "--vit-pool",
+        choices=["cls", "mean", "both"],
+        default="cls",
+        help="--model vit_imagenet / vit_supervised only: final-layer CLS token (768-D), mean patch token, or both.",
+    )
+    parser.add_argument(
         "--dataset",
         choices=["artbench", "wikiart"],
         default="artbench",
@@ -230,6 +248,7 @@ def main() -> None:
         device=args.device,
         ae_pool=args.ae_pool,
         mae_pool=args.mae_pool,
+        vit_pool=args.vit_pool,
     )
 
     # Build the transform from the extractor
@@ -240,8 +259,10 @@ def main() -> None:
     model_slug = MODEL_SLUGS.get(args.model, args.model).replace("/", "_").replace(":", "_")
     if args.checkpoint and args.model == "resnet50":
         model_slug = "resnet50_custom"
-    if hasattr(extractor, "file_slug"):      # MAE: slug names the model (and the dataset it was trained on)
-        model_slug = extractor.file_slug + ("" if args.mae_pool == "mean" else f"_{args.mae_pool}")
+    if hasattr(extractor, "file_slug"):      # MAE / ViT: slug names the model (and the dataset / init it was trained with)
+        model_slug = extractor.file_slug
+        if args.model.startswith("mae") and args.mae_pool != "mean":
+            model_slug += f"_{args.mae_pool}"
     parts: list[RepresentationBundle] = []
 
     for split in splits:
