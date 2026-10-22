@@ -73,6 +73,14 @@ MODEL_INFO = [
     ("dino_vitb16", "DINO v1 ViT-B/16 (ImageNet-1k)", "Self-supervised",
      "The original DINO (self-distillation, no labels) trained on ImageNet-1k only; CLS token, 768-D. "
      "The ImageNet-1k counterpart of DINOv2, which was trained on the larger LVD-142M collection."),
+    ("dino_adapt_artbench", "DINO v1 · adapted on ArtBench", "Self-supervised, in-domain",
+     "DINO v1 ViT-B/16 initialised from the ImageNet-1k weights and trained further with the DINO objective (50 epochs, low learning rate) on ArtBench-10 train only. Teacher CLS token, 768-D."),
+    ("dino_adapt_wikiart", "DINO v1 · adapted on WikiArt", "Self-supervised, in-domain",
+     "DINO v1 ViT-B/16 initialised from the ImageNet-1k weights and trained further with the DINO objective (50 epochs, low learning rate) on WikiArt train only. Teacher CLS token, 768-D."),
+    ("dino_scratch_artbench", "DINO v1 · from scratch on ArtBench", "Self-supervised, in-domain",
+     "DINO v1 ViT-B/16 trained from random initialisation with the DINO objective (200 epochs) on ArtBench-10 train only. Teacher CLS token, 768-D."),
+    ("dino_scratch_wikiart", "DINO v1 · from scratch on WikiArt", "Self-supervised, in-domain",
+     "DINO v1 ViT-B/16 trained from random initialisation with the DINO objective (200 epochs) on WikiArt train only. Teacher CLS token, 768-D."),
     ("gan_disc", "GAN (StyleGAN2): discriminator features", "Generative, adversarial",
      "StyleGAN2 (128 px, adaptive augmentation) trained from scratch on ArtBench + WikiArt train. Penultimate "
      "features of the discriminator (the 512-D layer before the real/fake logit) on every real painting."),

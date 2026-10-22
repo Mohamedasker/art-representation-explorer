@@ -38,6 +38,11 @@ Confident paintings only (CLIP puts >= 0.35 of its ImageNet probability on one W
 | dino_scratch_artbench | 0.463 | 0.154 | 0.552 | 0.271 |
 | dino_scratch_wikiart | 0.480 | 0.185 | 0.552 | 0.266 |
 | clip_vitb32 | 0.641 | 0.235 | 0.654 | 0.397 |
+| clip_vitb32_qgelu | 0.648 | 0.260 | 0.669 | 0.406 |
+| clip_ft_artbench | 0.588 | 0.198 | 0.715 | 0.471 |
+| clip_ft_artbench_wise50 | 0.625 | 0.234 | 0.696 | 0.449 |
+| clip_ft_wikiart | 0.597 | 0.225 | 0.705 | 0.448 |
+| clip_ft_wikiart_wise50 | 0.634 | 0.242 | 0.696 | 0.442 |
 
 ## wikiart (10,000 images; chance kNN for ImageNet groups 0.226, for styles 0.172)
 
@@ -74,4 +79,8 @@ Confident paintings only (CLIP puts >= 0.35 of its ImageNet probability on one W
 | dino_adapt_wikiart | 0.614 | 0.280 | 0.503 | 0.229 |
 | dino_scratch_artbench | 0.488 | 0.166 | 0.457 | 0.199 |
 | dino_scratch_wikiart | 0.510 | 0.193 | 0.496 | 0.237 |
-| clip_vitb32 | 0.666 | 0.253 | 0.562 | 0.325 |
+| clip_vitb32 | 0.666 | 0.252 | 0.562 | 0.325 |
+| clip_vitb32_qgelu | 0.669 | 0.264 | 0.579 | 0.339 |
+| clip_ft_artbench | 0.623 | 0.214 | 0.621 | 0.378 |
+| clip_ft_artbench_wise50 | 0.650 | 0.242 | 0.608 | 0.368 |
+| clip_ft_wikiart | 0.625 | 0.240 | 0.649 | 0.378 |

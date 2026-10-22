@@ -60,7 +60,11 @@ FAMILIES = [
                                           ("ar_vq", "VQ tokenizer latents (baseline)")]),
     ("gan", "GAN (StyleGAN2)", [("gan_disc", "discriminator features"), ("gan_enc", "inversion encoder (latent w)")]),
     ("dino", "DINO / DINOv2 (ViT-B)", [("dinov2", "DINOv2 ViT-B/14 (LVD-142M)"),
-                                       ("dino_vitb16", "DINO v1 ViT-B/16 (ImageNet-1k)")]),
+                                       ("dino_vitb16", "DINO v1 ViT-B/16 (ImageNet-1k)"),
+                                       ("dino_adapt_artbench", "DINO v1, ImageNet, adapted on ArtBench"),
+                                       ("dino_adapt_wikiart", "DINO v1, ImageNet, adapted on WikiArt"),
+                                       ("dino_scratch_artbench", "DINO v1, from scratch on ArtBench"),
+                                       ("dino_scratch_wikiart", "DINO v1, from scratch on WikiArt")]),
     ("clip", "CLIP ViT-B/32", [("clip", "OpenAI")]),
 ]
 _STEM = re.compile(r"^(artbench|wikiart)_(.+)_(all|train|test)$")

@@ -351,6 +351,62 @@ resumable and self-chaining like the other trainers. A FID-like number (torchvis
 real images, not comparable to published FIDs) is logged every 1000 kimg. Run, settings, stability and samples: `docs/gan_runs.md`.
 
 | Model (`--model`) | What is embedded | File slug (`representations/<dataset>_<slug>_{train,test,all}.npz`) |
+## Autoregressive models (iGPT, VQ tokens + GPT)
+
+Two generative autoregressive families trained from scratch on ArtBench-10 + WikiArt (train splits jointly), shown as the model type "Autoregressive transformer" with a
+Weights menu (`docs/ar_runs.md`: sizes, losses, layer curves, samples, wandb links):
+
+| Model (`--model`) | What | Embedding | File slug |
+|---|---|---|---|
+| `ar_igpt` + `--checkpoint` | **iGPT**: 76.7M GPT on 32 x 32 px images, one pixel = one of 512 palette colours (`scripts/26_prepare_igpt.py`, `27_train_igpt.py`) | mean over the 1024 positions of the hidden states of ONE intermediate block (layer picked with a style probe, `24_probe_ar_layers.py`), 512-D | `ar_igpt` |
+| `ar_gpt` + `--checkpoint` | VQ tokenizer (128 px -> 16 x 16 tokens, 4096 codes; `21_train_vq.py`, `22_tokenize_ar.py`) + 160M GPT (`23_train_ar.py`, optional dataset / style prefix tokens) | same recipe on the tokens, 1024-D | `ar_gpt` |
+| `ar_vq` + `--checkpoint` | tokenizer only (baseline) | quantised latents pooled to 4 x 4, 512-D | `ar_vq` |
+
+The real image is tokenised with fixed preprocessing (no sampling) and fed through the transformer in eval mode with "no label" prefix tokens; `--ar-layer N` overrides the probed layer.
+
+```bash
+python scripts/20_prepare_ar_data.py && python scripts/26_prepare_igpt.py          # pixel cache (128 px) and iGPT palette / tokens, once, login node
+IGPT_EPOCHS=14 CHAIN=1 sbatch scripts/slurm/train_igpt.sbatch                      # iGPT, 4 GPUs (devel: 2 h segments, self-resubmitting)
+SKIP_SMOKE=1 CHAIN=1 NEXT_AR=1 sbatch --partition=dc-gpu --time=04:00:00 scripts/slurm/train_vq.sbatch   # VQ tokenizer, then tokenising + GPT training
+python scripts/24_probe_ar_layers.py --checkpoint runs/<run>/checkpoints/best.pt   # layer-by-layer style probe -> layer_probe.json
+IGPT_RUN=runs/<igpt run> AR_RUN=runs/<vq-gpt run> sbatch scripts/slurm/embed_ar.sbatch   # embeddings (train/test/all), explorer pages
+```
+
+---
+
+## DINO v1 trained on ArtBench / WikiArt
+
+DINO v1 (Caron et al. 2021, self-distillation without labels) ViT-B/16, trained here on the train split of ONE dataset at a time
+(`scripts/29_train_dino.py`, model in `src/models/dino.py`): student + EMA teacher (momentum cosine 0.996 -> 1), multi-crop (2 global
+224 px crops scale 0.4-1, 6 local 96 px crops scale 0.05-0.4), colour jitter / grayscale / blur / solarisation, centring + sharpening
+(teacher temperature 0.04 -> 0.07, student 0.1), 3-layer MLP head with weight-normalised last layer, AdamW with linearly scaled LR
+(warm-up + cosine), weight decay 0.04 -> 0.4, stochastic depth 0.1, per-parameter gradient clipping, bf16, 4 A100 (DDP, global batch 256,
+~950 img/s). Data loading reads uint8 256 px caches (`scripts/29_cache_images.py`, `data/cache256/`, git-ignored).
+
+| Weights (`representations/<dataset>_<slug>_{train,test,all}.npz`) | Init | Epochs | peak LR (batch 256) | prototypes | kNN / linear (teacher, style, 10k -> 4k) |
+|------|------|-----|------|-----|------|
+| `dino_adapt_artbench` | ImageNet-1k DINO (backbone + heads) | 50 | 1e-4 | 65536 | 0.585 / 0.552 (before: 0.542 / 0.556) |
+| `dino_adapt_wikiart` | ImageNet-1k DINO | 50 | 1e-4 | 65536 | 0.561 / 0.460 (before: 0.518 / 0.468) |
+| `dino_scratch_artbench` | random | 200 | 5e-4 | 16384 | 0.528 / 0.540 |
+| `dino_scratch_wikiart` | random | 200 | 5e-4 | 16384 | 0.517 / 0.436 |
+
+The adapted runs start from Meta's full checkpoint (`pretrained/dino_vitb16_full/`, download URL in `src/models/dino.py`). Embedding = CLS
+token of the **teacher** backbone (768-D, L2-normalised), Resize 256 + CenterCrop 224, ImageNet mean/std, as for the pretrained `dino_vitb16`.
+All four models are embedded on both datasets (cross-dataset). Collapse monitors (teacher entropy, KL of the mean teacher output to
+uniform, feature spread) and kNN / linear probes every 5 epochs are logged to wandb / `runs/<run>/metrics.jsonl`.
+
+```bash
+python scripts/29_cache_images.py                                   # once, login node
+DATASET=artbench INIT=scratch  TRAIN_ARGS="--epochs 200" TIME_LIMIT_MIN=465 CHAIN=1 NEXT_TIME=08:00:00 \
+    sbatch --partition=dc-gpu --time=08:00:00 scripts/slurm/train_dino.sbatch      # INIT=imagenet --epochs 50 for the adapted runs
+DINO_RUNS="runs/<adapt_ab> runs/<adapt_wa> runs/<scratch_ab> runs/<scratch_wa>" sbatch scripts/slurm/dino_embeddings.sbatch
+python scripts/02_extract_features.py --model dino_train --checkpoint runs/<run>/dino_final.pt --dataset artbench --split all
+```
+
+---
+
+## Explicit images are hidden in the explorer by default
+
 |-------|---------|------|
 | `gan_disc` + `--checkpoint runs/<run>/gan_final.pt` | **discriminator features**: the 512-D output of its last hidden layer (input of the real/fake logit), eval mode, no gradients | `gan_disc` |
 | `gan_enc` + `--checkpoint runs/<enc run>/gan_enc_final.pt` | **inversion encoder**: latent w (512-D) of a ResNet-34 trained to invert the frozen generator (`scripts/25_train_gan_encoder.py`; pixel L2 + VGG-16 perceptual loss on real paintings, latent supervision on generated ones) | `gan_enc` |
