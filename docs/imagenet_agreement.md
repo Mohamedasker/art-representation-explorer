@@ -26,12 +26,17 @@ Confident paintings only (CLIP puts >= 0.35 of its ImageNet probability on one W
 | vit_imagenet | 0.534 | 0.207 | 0.476 | 0.184 |
 | vit_supervised | 0.389 | 0.122 | 0.833 | 0.653 |
 | vit_supervised_ft | 0.511 | 0.199 | 0.786 | 0.569 |
+| ar_igpt | 0.344 | 0.082 | 0.408 | 0.154 |
 | ar_gpt | 0.407 | 0.102 | 0.474 | 0.172 |
 | ar_vq | 0.333 | 0.052 | 0.352 | 0.089 |
 | gan_disc | 0.393 | 0.111 | 0.402 | 0.152 |
 | gan_enc | 0.393 | 0.115 | 0.417 | 0.132 |
 | dinov2_vitb14 | 0.668 | 0.293 | 0.558 | 0.268 |
 | dino_vitb16 | 0.585 | 0.237 | 0.561 | 0.242 |
+| dino_adapt_artbench | 0.595 | 0.275 | 0.566 | 0.288 |
+| dino_adapt_wikiart | 0.576 | 0.264 | 0.574 | 0.286 |
+| dino_scratch_artbench | 0.463 | 0.154 | 0.552 | 0.271 |
+| dino_scratch_wikiart | 0.480 | 0.185 | 0.552 | 0.266 |
 | clip_vitb32 | 0.641 | 0.235 | 0.654 | 0.397 |
 
 ## wikiart (10,000 images; chance kNN for ImageNet groups 0.226, for styles 0.172)
@@ -58,10 +63,15 @@ Confident paintings only (CLIP puts >= 0.35 of its ImageNet probability on one W
 | vit_imagenet | 0.566 | 0.234 | 0.393 | 0.161 |
 | vit_supervised | 0.443 | 0.116 | 0.820 | 0.668 |
 | vit_supervised_ft | 0.547 | 0.191 | 0.759 | 0.528 |
+| ar_igpt | 0.363 | 0.094 | 0.324 | 0.124 |
 | ar_gpt | 0.437 | 0.117 | 0.406 | 0.138 |
 | ar_vq | 0.347 | 0.068 | 0.257 | 0.077 |
 | gan_disc | 0.423 | 0.118 | 0.304 | 0.122 |
 | gan_enc | 0.416 | 0.144 | 0.328 | 0.117 |
 | dinov2_vitb14 | 0.689 | 0.311 | 0.472 | 0.209 |
 | dino_vitb16 | 0.610 | 0.254 | 0.511 | 0.210 |
+| dino_adapt_artbench | 0.598 | 0.264 | 0.497 | 0.224 |
+| dino_adapt_wikiart | 0.614 | 0.280 | 0.503 | 0.229 |
+| dino_scratch_artbench | 0.488 | 0.166 | 0.457 | 0.199 |
+| dino_scratch_wikiart | 0.510 | 0.193 | 0.496 | 0.237 |
 | clip_vitb32 | 0.666 | 0.253 | 0.562 | 0.325 |

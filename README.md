@@ -275,6 +275,29 @@ Test accuracies and run directories: `docs/vit_runs.md`.
 
 ---
 
+## Autoregressive models (iGPT, VQ tokens + GPT)
+
+Two generative autoregressive families trained from scratch on ArtBench-10 + WikiArt (train splits jointly), shown as the model type "Autoregressive transformer" with a
+Weights menu (`docs/ar_runs.md`: sizes, losses, layer curves, samples, wandb links):
+
+| Model (`--model`) | What | Embedding | File slug |
+|---|---|---|---|
+| `ar_igpt` + `--checkpoint` | **iGPT**: 76.7M GPT on 32 x 32 px images, one pixel = one of 512 palette colours (`scripts/26_prepare_igpt.py`, `27_train_igpt.py`) | mean over the 1024 positions of the hidden states of ONE intermediate block (layer picked with a style probe, `24_probe_ar_layers.py`), 512-D | `ar_igpt` |
+| `ar_gpt` + `--checkpoint` | VQ tokenizer (128 px -> 16 x 16 tokens, 4096 codes; `21_train_vq.py`, `22_tokenize_ar.py`) + 160M GPT (`23_train_ar.py`, optional dataset / style prefix tokens) | same recipe on the tokens, 1024-D | `ar_gpt` |
+| `ar_vq` + `--checkpoint` | tokenizer only (baseline) | quantised latents pooled to 4 x 4, 512-D | `ar_vq` |
+
+The real image is tokenised with fixed preprocessing (no sampling) and fed through the transformer in eval mode with "no label" prefix tokens; `--ar-layer N` overrides the probed layer.
+
+```bash
+python scripts/20_prepare_ar_data.py && python scripts/26_prepare_igpt.py          # pixel cache (128 px) and iGPT palette / tokens, once, login node
+IGPT_EPOCHS=14 CHAIN=1 sbatch scripts/slurm/train_igpt.sbatch                      # iGPT, 4 GPUs (devel: 2 h segments, self-resubmitting)
+SKIP_SMOKE=1 CHAIN=1 NEXT_AR=1 sbatch --partition=dc-gpu --time=04:00:00 scripts/slurm/train_vq.sbatch   # VQ tokenizer, then tokenising + GPT training
+python scripts/24_probe_ar_layers.py --checkpoint runs/<run>/checkpoints/best.pt   # layer-by-layer style probe -> layer_probe.json
+IGPT_RUN=runs/<igpt run> AR_RUN=runs/<vq-gpt run> sbatch scripts/slurm/embed_ar.sbatch   # embeddings (train/test/all), explorer pages
+```
+
+---
+
 ## Explicit images are hidden in the explorer by default
 
 ## CLIP gently fine-tuned on ArtBench / WikiArt (fit the data without forgetting)
