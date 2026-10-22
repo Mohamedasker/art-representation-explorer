@@ -52,6 +52,9 @@ FAMILIES = [
     ("simclr", "SimCLR ResNet-50", [("simclr_imagenet", "ImageNet (frozen)"),
                                     ("simclr_artbench", "trained on ArtBench"),
                                     ("simclr_wikiart", "trained on WikiArt")]),
+    ("vit", "ViT-B/16 (supervised)", [("vit_imagenet", "ImageNet (frozen)"),
+                                      ("vit_supervised", "trained here (from scratch)"),
+                                      ("vit_supervised_ft", "ImageNet, fine-tuned on art labels")]),
     ("dinov2", "DINOv2 ViT-B/14", [("dinov2", "Meta (LVD-142M)")]),
     ("clip", "CLIP ViT-B/32", [("clip", "OpenAI")]),
 ]
@@ -69,11 +72,12 @@ def member_of(stem: str) -> tuple[str, str] | None:
     if not m:
         return None
     model = m.group(2)
+    best = None
     for fam, _title, members in FAMILIES:
         for key, _label in members:
-            if model == key or model.startswith(key + "_"):
-                return fam, key
-    return None
+            if (model == key or model.startswith(key + "_")) and (best is None or len(key) > len(best[1])):
+                best = (fam, key)                # longest key wins (vit_supervised_ft before vit_supervised)
+    return best
 
 
 def family_title(fam: str) -> str:

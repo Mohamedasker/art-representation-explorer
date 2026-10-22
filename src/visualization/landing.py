@@ -52,6 +52,14 @@ MODEL_INFO = [
     ("mae_scratch_wikiart", "MAE · from scratch on WikiArt", "Masked autoencoder, in-domain",
      "Randomly initialised MAE ViT-B/16 trained with the masked-patch objective on WikiArt train only."),
     *_simclr_info(),
+    ("vit_imagenet", "ViT-B/16 (ImageNet)", "Supervised, off-the-shelf",
+     "Standard ImageNet-1k classification ViT-B/16 (timm augreg_in1k), frozen; never trained on art. Final-layer CLS token, 768-D."),
+    ("vit_supervised_ft", "ViT-B/16 (ImageNet, fine-tuned on art)", "Supervised, in-domain",
+     "ImageNet ViT-B/16 fine-tuned to predict style, genre and artist of ArtBench + WikiArt (multi-task). "
+     "Final-layer CLS token, 768-D."),
+    ("vit_supervised", "ViT-B/16 (trained here)", "Supervised, in-domain",
+     "ViT-B/16 trained from scratch on ArtBench + WikiArt to predict style, genre and artist (multi-task), "
+     "like the ResNet-50. Final-layer CLS token, 768-D."),
     ("dinov2", "DINOv2 ViT-B/14", "Self-supervised",
      "Pretrained with self-distillation on large image collections; no labels and no text."),
     ("clip", "CLIP ViT-B/32", "Language-supervised",

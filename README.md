@@ -240,6 +240,41 @@ simclr_final.pt). Results table (run dir, wandb run, probe accuracy): `docs/simc
 
 ---
 
+## Supervised ViT-B/16 (ImageNet vs. trained on the art labels)
+
+A plain Vision Transformer (timm `vit_base_patch16_224`, 224 px, 85.9M parameters) trained on the style / genre / artist labels of
+ArtBench-10 + WikiArt exactly like the supervised ResNet-50 (`scripts/10_train_cnn.py`): train splits of both datasets jointly,
+three linear heads on the encoder output, the same loss weights (style 1, genre 0.5, artist 0.5, label smoothing 0.1), RandomResizedCrop
+(0.35-1) + flip, AdamW + cosine schedule, bf16, 4 GPUs DDP, held-out evaluation on both test splits, wandb, `runs/<stamp>_<name>/`
+run directories (resumable). Differences forced by the architecture: 224 px instead of 256, mean = std = 0.5 normalisation (what the
+timm ViT weights expect), stochastic depth 0.1, a lower peak LR (AdamW, global batch 256: 2.5e-4 from scratch).
+
+| Model (`--model`) | Weights | File slug (`representations/<dataset>_<slug>_{train,test,all}.npz`) |
+|-------|---------|------|
+| `vit_imagenet` | timm `vit_base_patch16_224.augreg_in1k` (ImageNet-1k supervised only, no ImageNet-21k), frozen | `vit_imagenet` |
+| `vit_supervised` + `--checkpoint` | trained here **from scratch** (`--init scratch`; parallel to `cnn_supervised`) | `vit_supervised` |
+| `vit_supervised` + `--checkpoint` | **ImageNet init, fine-tuned** on the art labels (`--init imagenet`, peak LR 5e-5, layer-wise LR decay 0.75) | `vit_supervised_ft` |
+
+*Embedding* = the final-layer **CLS token** after the encoder's last LayerNorm (768-D, the input of the heads), for all three. `--vit-pool mean`
+gives the mean of the 196 patch tokens, `both` their concatenation (files get a `_mean` / `_both` suffix). Pre-processing: resize 224,
+centre crop, normalise with 0.5/0.5; vectors are not standardised.
+
+```bash
+# 4 GPUs (smoke test first; INIT=scratch|imagenet; self-resubmitting on a normal partition with CHAIN=1)
+INIT=scratch  SKIP_SMOKE=1 TIME_LIMIT_MIN=1410 CHAIN=1 sbatch --partition=dc-gpu --time=24:00:00 scripts/slurm/train_vit.sbatch
+INIT=imagenet SKIP_SMOKE=1 TIME_LIMIT_MIN=1410 CHAIN=1 sbatch --partition=dc-gpu --time=24:00:00 scripts/slurm/train_vit.sbatch
+RESUME=runs/<stamp>_vit_scratch sbatch scripts/slurm/train_vit.sbatch
+# embeddings (train + test + merged)
+python scripts/02_extract_features.py --model vit_imagenet --dataset artbench --split all
+python scripts/02_extract_features.py --model vit_supervised --checkpoint runs/<run>/vit_final.pt --dataset wikiart --split all
+```
+
+The ImageNet weights are read from the Hugging Face cache (fetch them once on a login node, compute nodes have no internet):
+`python -c "import timm; timm.create_model('vit_base_patch16_224.augreg_in1k', pretrained=True)"`.
+Test accuracies and run directories: `docs/vit_runs.md`.
+
+---
+
 ## Explicit images are hidden in the explorer by default
 
 Paintings with nudity are flagged automatically and **hidden by default** in every explorer page, the overview and the feature-map
