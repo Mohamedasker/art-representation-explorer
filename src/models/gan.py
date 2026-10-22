@@ -32,6 +32,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 SQRT2 = math.sqrt(2.0)
+CHANNELS_LAST = False            # set by the training script (--channels-last): NHWC activations, same numerics, faster on A100
 _FIR = [1.0, 3.0, 3.0, 1.0]
 
 
@@ -66,30 +67,26 @@ class GanConfig:
 
 # ── resampling ────────────────────────────────────────────────────────────────
 
-def _fir(device, dtype) -> torch.Tensor:
-    f = torch.tensor(_FIR, device=device, dtype=dtype)
-    f = f[:, None] * f[None, :]
-    return f / f.sum()
-
-
 def upsample2(x: torch.Tensor) -> torch.Tensor:
-    """Zero-insertion x2 followed by the [1,3,3,1] low-pass (gain 4 to keep the mean)."""
-    c = x.shape[1]
-    k = (_fir(x.device, x.dtype) * 4)[None, None].expand(c, 1, 4, 4).contiguous()
-    return F.conv_transpose2d(x, k, stride=2, padding=1, groups=c)
+    """x2 upsampling with the [1,3,3,1] filter of StyleGAN2 (zero-insertion + low-pass == bilinear interpolation with
+    weights 3/4, 1/4; the image border replicates instead of fading to zero).  ``F.interpolate`` is far cheaper than a
+    depthwise ``conv_transpose2d`` and keeps double back-prop (R1, path length) fast."""
+    return F.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False)
+
+
+def _box(x: torch.Tensor, stride: int = 1) -> torch.Tensor:
+    return F.avg_pool2d(x, 2, stride)
 
 
 def blur(x: torch.Tensor) -> torch.Tensor:
-    """[1,3,3,1] low-pass at constant resolution (asymmetric padding for the even kernel)."""
-    c = x.shape[1]
-    k = _fir(x.device, x.dtype)[None, None].expand(c, 1, 4, 4).contiguous()
-    return F.conv2d(F.pad(x, (1, 2, 1, 2), mode="reflect"), k, groups=c)
+    """[1,3,3,1]/8 low-pass at constant resolution (reflect padding): [1,3,3,1] = [1,1] * [1,1] * [1,1], so three box
+    filters (avg-pooling, native kernels, unlike a depthwise conv)."""
+    return _box(_box(_box(F.pad(x, (1, 2, 1, 2), mode="reflect"))))
 
 
 def downsample2(x: torch.Tensor) -> torch.Tensor:
-    c = x.shape[1]
-    k = _fir(x.device, x.dtype)[None, None].expand(c, 1, 4, 4).contiguous()
-    return F.conv2d(x, k, stride=2, padding=1, groups=c)
+    """[1,3,3,1]/8 low-pass + stride 2 (zero padding): [1,2,1] box cascade, then a stride-2 box."""
+    return _box(_box(_box(F.pad(x, (1, 1, 1, 1)))), 2)
 
 
 # ── equalised-lr layers ───────────────────────────────────────────────────────
@@ -123,7 +120,7 @@ class EqualConv(nn.Module):
         else:
             x = F.conv2d(x, w, padding=self.pad)
         if self.bias is not None:
-            x = x + self.bias[None, :, None, None]
+            x = x + self.bias.to(x.dtype)[None, :, None, None]
         return F.leaky_relu(x, 0.2) * SQRT2 if self.act else x
 
 
@@ -162,7 +159,7 @@ class SynthLayer(nn.Module):
         x = self.conv(x, w)
         if noise:
             x = x + torch.randn(x.shape[0], 1, self.res, self.res, device=x.device, dtype=x.dtype) * self.noise_strength
-        return F.leaky_relu(x + self.bias[None, :, None, None], 0.2) * SQRT2
+        return F.leaky_relu(x + self.bias.to(x.dtype)[None, :, None, None], 0.2) * SQRT2
 
 
 class ToRGB(nn.Module):
@@ -172,7 +169,7 @@ class ToRGB(nn.Module):
         self.bias = nn.Parameter(torch.zeros(3))
 
     def forward(self, x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
-        return self.conv(x, w) + self.bias[None, :, None, None]
+        return self.conv(x, w) + self.bias.to(x.dtype)[None, :, None, None]
 
 
 class Mapping(nn.Module):
@@ -215,6 +212,8 @@ class Generator(nn.Module):
     def synthesis(self, ws: torch.Tensor, noise: bool = True) -> torch.Tensor:
         """ws: (B, num_ws, w_dim) -> images in [-1, 1]-ish (not clamped), (B, 3, S, S)."""
         x = self.const[None].expand(ws.shape[0], -1, -1, -1)
+        if CHANNELS_LAST:
+            x = x.contiguous(memory_format=torch.channels_last)
         x = self.conv4(x, ws[:, 0], noise)
         img = self.rgb4(x, ws[:, 1])
         i = 2
@@ -274,6 +273,8 @@ class Discriminator(nn.Module):
 
     def features(self, img: torch.Tensor) -> torch.Tensor:
         """Penultimate vector (B, 512): output of the fc layer after the activation (input of the logit layer)."""
+        if CHANNELS_LAST:
+            img = img.contiguous(memory_format=torch.channels_last)
         x = self.blocks(self.fromrgb(img))
         with torch.autocast("cuda", enabled=False):                  # 4x4 epilogue in fp32
             x = self.conv(self._mbstd(x.float()))

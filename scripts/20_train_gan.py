@@ -46,6 +46,7 @@ from torchvision import transforms
 from torchvision.utils import make_grid, save_image
 
 from src.datasets.union import UnionImageDataset
+import src.models.gan as gan_module
 from src.models.gan import AugmentPipe, Discriminator, GanConfig, Generator
 from src.training.common import init_wandb, reduce_mean, save_ckpt_atomic, setup_dist, setup_logging
 
@@ -82,6 +83,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--amp", choices=["none", "bf16"], default=None,
                    help="bfloat16 autocast of the convolutions in the main G / D steps (regularisers stay fp32); default none. "
                         "May be changed when resuming")
+    p.add_argument("--channels-last", action="store_true", help="NHWC memory format for G / D (same numerics)")
+    p.add_argument("--compile", action="store_true",
+                   help="torch.compile G.synthesis / D for the main G and D steps (fuses the element-wise ops; the "
+                        "regularisers with double back-prop stay eager)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--num-workers", type=int, default=12, help="DataLoader workers per GPU")
     p.add_argument("--draft-size", type=int, default=256, help="JPEG draft decode: shrink big images at decode time")
@@ -197,11 +202,11 @@ def main() -> None:
     resume_dir = Path(args.resume).resolve() if args.resume else None
     if resume_dir is not None:
         saved = json.loads((resume_dir / "config.json").read_text())["args"]
-        keep = {k: getattr(args, k) for k in ("resume", "wandb", "time_limit_min", "num_workers", "max_steps", "kimg", "amp")}
+        keep = {k: getattr(args, k) for k in ("resume", "wandb", "time_limit_min", "num_workers", "max_steps", "kimg", "amp", "compile", "channels_last")}
         for k, v in saved.items():
             setattr(args, k, v)
         for k, v in keep.items():
-            if k in ("max_steps", "kimg", "amp") and v is None:      # not given on the command line: keep the saved value
+            if k in ("max_steps", "kimg", "amp") and v is None or k in ("compile", "channels_last") and not v:      # not given on the command line: keep the saved value
                 continue
             setattr(args, k, v)
         run_dir = resume_dir
@@ -225,6 +230,7 @@ def main() -> None:
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cudnn.benchmark = True
+    gan_module.CHANNELS_LAST = args.channels_last
 
     # ── data ─────────────────────────────────────────────────────────────────
     train_ds = build_data(args, "train")
@@ -240,6 +246,8 @@ def main() -> None:
                     map_layers=args.map_layers)
     torch.manual_seed(args.seed)
     G, D = Generator(cfg).to(device), Discriminator(cfg).to(device)
+    if args.channels_last:
+        G, D = G.to(memory_format=torch.channels_last), D.to(memory_format=torch.channels_last)
     G_ema = copy.deepcopy(G).eval().requires_grad_(False)
     for t in list(G.state_dict().values()) + list(D.state_dict().values()):     # identical init on every rank
         if world > 1:
@@ -382,6 +390,8 @@ def main() -> None:
     stop_reason = "finished"
     G.train(); D.train()
 
+    Gsyn, Dfwd = (torch.compile(G.synthesis), torch.compile(D)) if args.compile else (G.synthesis, D)
+
     def autocast():
         return torch.autocast("cuda", dtype=torch.bfloat16, enabled=args.amp == "bf16")
 
@@ -412,7 +422,7 @@ def main() -> None:
             w_batch = ws[:, 0].detach()
             G.mapping.w_avg.copy_(w_batch.mean(0).lerp(G.mapping.w_avg, 0.995))
         with autocast():
-            loss_G = F.softplus(-D(aug(G.synthesis(ws))).float()).mean()
+            loss_G = F.softplus(-Dfwd(aug(Gsyn(ws))).float()).mean()
         optG.zero_grad(set_to_none=True)
         loss_G.backward()
         sync_grads(gp, world); optG.step()
@@ -435,9 +445,9 @@ def main() -> None:
         # -- D main
         requires_grad(G, False); requires_grad(D, True)
         with torch.no_grad(), autocast():
-            fake = G.synthesis(gen_ws(b))
+            fake = Gsyn(gen_ws(b))
         with autocast():
-            d_fake, d_real = D(aug(fake)).float(), D(aug(real)).float()
+            d_fake, d_real = Dfwd(aug(fake)).float(), Dfwd(aug(real)).float()
         loss_D = F.softplus(d_fake).mean() + F.softplus(-d_real).mean()
         optD.zero_grad(set_to_none=True)
         loss_D.backward()
