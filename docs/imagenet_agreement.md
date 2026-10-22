@@ -27,6 +27,7 @@ Confident paintings only (CLIP puts >= 0.35 of its ImageNet probability on one W
 | vit_supervised | 0.389 | 0.122 | 0.833 | 0.653 |
 | vit_supervised_ft | 0.511 | 0.199 | 0.786 | 0.569 |
 | dinov2_vitb14 | 0.668 | 0.293 | 0.558 | 0.268 |
+| dino_vitb16 | 0.585 | 0.237 | 0.561 | 0.242 |
 | clip_vitb32 | 0.641 | 0.235 | 0.654 | 0.397 |
 
 ## wikiart (10,000 images; chance kNN for ImageNet groups 0.226, for styles 0.172)
@@ -54,4 +55,5 @@ Confident paintings only (CLIP puts >= 0.35 of its ImageNet probability on one W
 | vit_supervised | 0.443 | 0.116 | 0.820 | 0.668 |
 | vit_supervised_ft | 0.547 | 0.191 | 0.759 | 0.528 |
 | dinov2_vitb14 | 0.689 | 0.311 | 0.472 | 0.209 |
-| clip_vitb32 | 0.666 | 0.252 | 0.562 | 0.325 |
+| dino_vitb16 | 0.610 | 0.254 | 0.511 | 0.210 |
+| clip_vitb32 | 0.666 | 0.253 | 0.562 | 0.325 |

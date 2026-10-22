@@ -70,6 +70,9 @@ MODEL_INFO = [
      "with a style probe), 1024-D."),
     ("ar_vq", "Autoregressive model (VQ tokenizer latents)", "Generative, autoregressive (tokenizer only)",
      "Baseline without the transformer: the quantised latents of the VQ tokenizer, average-pooled to a 4x4 grid, 512-D."),
+    ("dino_vitb16", "DINO v1 ViT-B/16 (ImageNet-1k)", "Self-supervised",
+     "The original DINO (self-distillation, no labels) trained on ImageNet-1k only; CLS token, 768-D. "
+     "The ImageNet-1k counterpart of DINOv2, which was trained on the larger LVD-142M collection."),
     ("dinov2", "DINOv2 ViT-B/14", "Self-supervised",
      "Pretrained with self-distillation on large image collections; no labels and no text."),
     ("clip", "CLIP ViT-B/32", "Language-supervised",
