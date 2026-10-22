@@ -22,3 +22,20 @@ mean = std = 0.5 input normalisation).
 A ViT from scratch on ~123k images is weaker than the CNN (no convolutional inductive bias; still improving when the cosine schedule ended, so more epochs would
 help) while ImageNet initialisation is clearly better than both. Embeddings (final-layer CLS token, 768-D) of the three ViTs (frozen ImageNet weights, from scratch,
 fine-tuned) are in `representations/<dataset>_{vit_imagenet,vit_supervised,vit_supervised_ft}_{train,test,all}.npz`.
+
+## Agreement with ImageNet groups vs. art style (`scripts/18_imagenet_agreement.py`, full table: `imagenet_agreement.md`)
+
+kNN accuracy (10-NN majority vote, cosine, z-scored features; 10,000 images per dataset) predicting the CLIP-assigned ImageNet group / the art style:
+
+| | ArtBench ImageNet group | ArtBench style | WikiArt ImageNet group | WikiArt style |
+|---|---|---|---|---|
+| ResNet-50 ImageNet | 0.564 | 0.499 | 0.595 | 0.426 |
+| ResNet-50 trained here | 0.469 | 0.717 | 0.508 | 0.674 |
+| ViT-B/16 ImageNet (frozen) | 0.534 | 0.476 | 0.566 | 0.393 |
+| ViT-B/16 from scratch | 0.389 | **0.833** | 0.443 | **0.820** |
+| ViT-B/16 ImageNet, fine-tuned | 0.511 | 0.786 | 0.547 | 0.759 |
+
+Supervised training on the art labels moves the transformer's embedding from object content (ImageNet groups) to style, as for the CNN; the from-scratch ViT
+ends up the most style-organised (and the least object-organised) space, the fine-tuned one keeps more object information from its ImageNet start.
+(The style kNN of the trained models is measured on all of the 10,000 images including their training images, so it is optimistic compared with the held-out
+accuracies above.)
