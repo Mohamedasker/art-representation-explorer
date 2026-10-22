@@ -277,6 +277,80 @@ Test accuracies and run directories: `docs/vit_runs.md`.
 
 ## Explicit images are hidden in the explorer by default
 
+## CLIP gently fine-tuned on ArtBench / WikiArt (fit the data without forgetting)
+
+Two separate runs of the OpenAI CLIP ViT-B/32 (`ViT-B-32-quickgelu`, the exact model): one on ArtBench-10 train, one on WikiArt
+train (`scripts/28_train_clip_ft.py`; the test splits are only used for monitoring). Recipe, chosen to adapt the image tower to the art
+data while keeping CLIP's knowledge:
+
+* contrastive loss between the images and captions built from the labels ("a landscape painting by Vincent Van Gogh, in the post
+  impressionism style"; ArtBench has style + artist only, WikiArt genre + artist + style); captions shared by several images of a batch
+  are not negatives of each other (`--no-style-in-caption` leaves the style out, then it is only used for evaluation),
+* **text tower and logit scale frozen**: the caption embeddings are a fixed table in CLIP's original text space, the image tower is pulled
+  towards it (also means the text side costs nothing during training),
+* peak LR 1e-5 (not scaled), layer-wise LR decay 0.8, warm-up 200 steps, cosine, 5 epochs, global batch 512 (4 x 128), bf16,
+* **WiSE-FT**: `--clip-alpha a` interpolates the fine-tuned and the original image tower (`a * fine-tuned + (1 - a) * original`), e.g. 0.5.
+
+| Model (`--model`) | Weights | File slug (`representations/<dataset>_<slug>_{train,test,all}.npz`) |
+|-------|---------|------|
+| `clip_vitb32_qgelu` | OpenAI CLIP, frozen (exact model) | `clip_vitb32_qgelu` |
+| `clip_ft` + `--checkpoint runs/<run>/clip_ft_final.pt` | fine-tuned on ArtBench / WikiArt (`--clip-alpha 1`) | `clip_ft_artbench` / `clip_ft_wikiart` |
+| `clip_ft` + `--clip-alpha 0.5` | 50 % interpolation with the original | `clip_ft_<dataset>_wise50` |
+
+Embedding = L2-normalised CLIP image feature (512-D), same pre-processing as the frozen extractor. Every model is embedded on **both**
+datasets (cross-dataset: how much does the ArtBench-tuned model change the WikiArt space?).
+
+```bash
+# 4 GPUs (smoke test first; self-resubmitting on a normal partition with CHAIN=1)
+DATASET=artbench sbatch scripts/slurm/train_clip_ft.sbatch
+DATASET=wikiart  sbatch scripts/slurm/train_clip_ft.sbatch
+# embeddings (frozen + alpha 1.0 / 0.5 of both runs), docs/clip_ft_eval.md, explorer pages
+CLIP_FT_ARTBENCH=runs/<stamp>_clip_ft_artbench CLIP_FT_WIKIART=runs/<stamp>_clip_ft_wikiart sbatch scripts/slurm/embed_clip_ft.sbatch
+```
+
+Monitoring (`metrics.jsonl` / wandb; step 0 is the original CLIP): `val/caption_acc` (image -> its caption among all captions),
+`val/zs_style` (zero-shot style accuracy), `generic/cifar100`, `generic/cifar10` (zero-shot on CIFAR test sets in `data/generic`,
+the "did it forget?" probe; download once on a login node with torchvision). `scripts/29_eval_clip_ft.py` writes `docs/clip_ft_eval.md`:
+zero-shot style, CIFAR and kNN accuracy of the original and all fine-tuned models, with the test images that have a near-duplicate
+(CLIP cosine >= 0.95) in the other dataset's train split left out of the cross-dataset numbers.
+
+---
+
+## GAN (StyleGAN2) representations
+
+A StyleGAN2 trained from scratch on the **train splits of ArtBench-10 and WikiArt jointly** (123,143 paintings, unconditional, 128 px;
+`scripts/20_train_gan.py`, model in `src/models/gan.py`). Pure PyTorch, no custom CUDA ops (modulated convolutions in the non-fused form,
+the FIR resampling filters written with avg-pooling / bilinear interpolation), skip-architecture generator (23M parameters) and residual
+discriminator with minibatch-stddev (24M). Regularisation as in StyleGAN2-ADA: adaptive discriminator augmentation, lazy R1, path-length
+regularisation, G EMA. 4 GPUs (gradients all-reduced by hand because of the double back-prop), bf16 autocast, wandb,
+`runs/<stamp>_gan_union/` (config, `checkpoints/`, `samples/` grids of the EMA generator with fixed latents, `metrics.jsonl`, `gan_final.pt`),
+resumable and self-chaining like the other trainers. A FID-like number (torchvision Inception-v3 features, 5000 generated vs 5000 held-out
+real images, not comparable to published FIDs) is logged every 1000 kimg. Run, settings, stability and samples: `docs/gan_runs.md`.
+
+| Model (`--model`) | What is embedded | File slug (`representations/<dataset>_<slug>_{train,test,all}.npz`) |
+|-------|---------|------|
+| `gan_disc` + `--checkpoint runs/<run>/gan_final.pt` | **discriminator features**: the 512-D output of its last hidden layer (input of the real/fake logit), eval mode, no gradients | `gan_disc` |
+| `gan_enc` + `--checkpoint runs/<enc run>/gan_enc_final.pt` | **inversion encoder**: latent w (512-D) of a ResNet-34 trained to invert the frozen generator (`scripts/25_train_gan_encoder.py`; pixel L2 + VGG-16 perceptual loss on real paintings, latent supervision on generated ones) | `gan_enc` |
+
+Both use the same fixed pre-processing for every image (resize the shorter side to 128, centre crop, scale to [-1, 1]); in eval mode the
+discriminator's minibatch-stddev channel uses its training EMA, so a vector does not depend on the other images of its batch. Vectors are
+not normalised. The explorer shows one **GAN (StyleGAN2)** model type with a Weights menu (discriminator features / inversion encoder).
+
+```bash
+# 4 GPUs: smoke test + run in 2 h devel jobs that resubmit themselves (same run dir, same wandb run) until KIMG is reached
+KIMG=8000 CHAIN=1 NEXT_PARTITION=dc-gpu-devel NEXT_TIME=02:00:00 NEXT_TIME_LIMIT_MIN=108 TRAIN_ARGS="--amp bf16 --channels-last" \
+    sbatch scripts/slurm/train_gan.sbatch
+# the inversion encoder (needs the trained GAN)
+GAN_RUN=runs/<stamp>_gan_union sbatch scripts/slurm/train_gan_encoder.sbatch
+# embeddings (train + test + merged, both datasets) and the explorer pages
+GAN_RUN=runs/<stamp>_gan_union ENC_RUN=runs/<stamp>_gan_enc sbatch scripts/slurm/embed_gan.sbatch
+```
+
+The FID metric needs the torchvision Inception-v3 weights (the encoder the VGG-16 weights) in the torch hub cache: fetch them once on a
+login node (`torchvision.models.inception_v3(weights="IMAGENET1K_V1")`, `vgg16(weights="IMAGENET1K_V1")`); compute nodes have no internet.
+
+---
+
 Paintings with nudity are flagged automatically and **hidden by default** in every explorer page, the overview and the feature-map
 viewer: they are not drawn, cannot be hovered, selected or listed, and their image files are never requested. The header checkbox
 "show explicit images" (also in the overview's hero box) turns the filter off; the choice is stored in the browser (one key,
