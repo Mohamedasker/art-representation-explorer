@@ -65,7 +65,12 @@ FAMILIES = [
                                        ("dino_adapt_wikiart", "DINO v1, ImageNet, adapted on WikiArt"),
                                        ("dino_scratch_artbench", "DINO v1, from scratch on ArtBench"),
                                        ("dino_scratch_wikiart", "DINO v1, from scratch on WikiArt")]),
-    ("clip", "CLIP ViT-B/32", [("clip", "OpenAI")]),
+    ("clip", "CLIP ViT-B/32", [("clip", "OpenAI (frozen, GELU variant)"),
+                               ("clip_vitb32_qgelu", "OpenAI (frozen, exact model)"),
+                               ("clip_ft_artbench", "fine-tuned on ArtBench"),
+                               ("clip_ft_artbench_wise50", "fine-tuned on ArtBench, 50 % interpolated with OpenAI"),
+                               ("clip_ft_wikiart", "fine-tuned on WikiArt"),
+                               ("clip_ft_wikiart_wise50", "fine-tuned on WikiArt, 50 % interpolated with OpenAI")]),
 ]
 _STEM = re.compile(r"^(artbench|wikiart)_(.+)_(all|train|test)$")
 

@@ -91,6 +91,15 @@ MODEL_INFO = [
      "Pretrained with self-distillation on large image collections; no labels and no text."),
     ("clip", "CLIP ViT-B/32", "Language-supervised",
      "Pretrained to match images with captions; embeddings carry a lot of semantic content."),
+    ("clip_vitb32_qgelu", "CLIP ViT-B/32 (exact OpenAI model)", "Language-supervised",
+     "The OpenAI CLIP with its QuickGELU activation (the plain CLIP entry builds GELU, which shifts the features slightly); "
+     "the starting point of the fine-tuned CLIPs."),
+    *[(f"clip_ft_{ds}{suffix}", f"CLIP ViT-B/32 · fine-tuned on {name}{note}", "Language-supervised, in-domain",
+       f"OpenAI CLIP, image tower fine-tuned gently (low LR, few epochs, text tower frozen) with a contrastive loss "
+       f"between {name} train images and captions built from their labels{expl}. L2-normalised image feature, 512-D.")
+      for ds, name in (("artbench", "ArtBench"), ("wikiart", "WikiArt"))
+      for suffix, note, expl in (("", "", ""),
+                                 ("_wise50", " (50 % blend)", "; weights averaged 50/50 with the original image tower"))],
 ]
 DATASETS = {"artbench_train": ("ArtBench-10 · train", "50,000 paintings · 10 styles"),
             "artbench_test": ("ArtBench-10 · test", "10,000 held-out paintings"),

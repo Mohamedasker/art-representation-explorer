@@ -1,0 +1,60 @@
+[
+ {
+  "model": "original CLIP",
+  "slug": "clip_vitb32_qgelu",
+  "zs_style/artbench": 0.4867,
+  "knn_style/artbench": 0.6932,
+  "zs_style/wikiart": 0.23756173954945187,
+  "knn_style/wikiart": 0.6393205637874955,
+  "zs/cifar100": 0.6452000141143799,
+  "zs/cifar10": 0.8834999799728394
+ },
+ {
+  "model": "fine-tuned on artbench",
+  "slug": "clip_ft_artbench",
+  "zs_style/artbench": 0.6632,
+  "knn_style/artbench": 0.7344,
+  "zs_style/wikiart": 0.37959282014215157,
+  "zs_style/wikiart_no_dups": 0.3744061757719715,
+  "excluded/wikiart": 1565,
+  "knn_style/wikiart": 0.6702806890736056,
+  "zs/cifar100": 0.5976999998092651,
+  "zs/cifar10": 0.8101000189781189
+ },
+ {
+  "model": "fine-tuned on artbench (alpha 0.5)",
+  "slug": "clip_ft_artbench_wise50",
+  "zs_style/artbench": 0.5963,
+  "knn_style/artbench": 0.7272,
+  "zs_style/wikiart": 0.32839416937718346,
+  "zs_style/wikiart_no_dups": 0.3374406175771972,
+  "excluded/wikiart": 1565,
+  "knn_style/wikiart": 0.6641368509818094,
+  "zs/cifar100": 0.6395999789237976,
+  "zs/cifar10": 0.864799976348877
+ },
+ {
+  "model": "fine-tuned on wikiart",
+  "slug": "clip_ft_wikiart",
+  "zs_style/artbench": 0.6559,
+  "zs_style/artbench_no_dups": 0.6599644371495007,
+  "excluded/artbench": 2689,
+  "knn_style/artbench": 0.7328,
+  "zs_style/wikiart": 0.5086134200698711,
+  "knn_style/wikiart": 0.6911215516202868,
+  "zs/cifar100": 0.5620999932289124,
+  "zs/cifar10": 0.8267999887466431
+ },
+ {
+  "model": "fine-tuned on wikiart (alpha 0.5)",
+  "slug": "clip_ft_wikiart_wise50",
+  "zs_style/artbench": 0.6005,
+  "zs_style/artbench_no_dups": 0.6293256736424566,
+  "excluded/artbench": 2689,
+  "knn_style/artbench": 0.7258,
+  "zs_style/wikiart": 0.3907962896036622,
+  "knn_style/wikiart": 0.6741356463076738,
+  "zs/cifar100": 0.6259999871253967,
+  "zs/cifar10": 0.8677999973297119
+ }
+]

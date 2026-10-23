@@ -31,7 +31,9 @@ We generate and compare image representations of the [ArtBench-10](https://githu
 | `resnet50` + `--checkpoint` | ResNet-50 | Fine-tuned on ArtBench-10 |
 | `efficientnet_b0` | EfficientNet-B0 | ImageNet |
 | `vit_base_patch16_224` | ViT-B/16 | ImageNet |
-| `clip_vitb32` | CLIP ViT-B/32 | OpenAI |
+| `clip_vitb32` | CLIP ViT-B/32 | OpenAI (built with GELU, not the QuickGELU the weights were trained with) |
+| `clip_vitb32_qgelu` | CLIP ViT-B/32 | OpenAI, exact model (QuickGELU) |
+| `clip_ft` + `--checkpoint` | CLIP ViT-B/32 | OpenAI, image tower fine-tuned on ArtBench or WikiArt (see below) |
 | `clip_vitl14` | CLIP ViT-L/14 | OpenAI |
 | `clip_vitb32_laion` | CLIP ViT-B/32 | LAION-2B |
 | `dinov2_vitb14` | DINOv2 ViT-B/14 | Meta AI (LVD-142M) |

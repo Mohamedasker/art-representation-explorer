@@ -84,3 +84,4 @@ Confident paintings only (CLIP puts >= 0.35 of its ImageNet probability on one W
 | clip_ft_artbench | 0.623 | 0.214 | 0.621 | 0.378 |
 | clip_ft_artbench_wise50 | 0.650 | 0.242 | 0.608 | 0.368 |
 | clip_ft_wikiart | 0.625 | 0.240 | 0.649 | 0.378 |
+| clip_ft_wikiart_wise50 | 0.653 | 0.248 | 0.622 | 0.376 |

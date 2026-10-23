@@ -102,7 +102,8 @@ from src.models.base_extractor import RepresentationBundle
 # ── Model registry ────────────────────────────────────────────────────────────
 
 def _get_extractor(model_id: str, checkpoint, batch_size: int, device: str | None, ae_pool: int = 4,
-                   mae_pool: str = "mean", vit_pool: str = "cls", ar_layer: int | None = None):
+                   mae_pool: str = "mean", vit_pool: str = "cls", ar_layer: int | None = None,
+                   clip_alpha: float = 1.0):
     """Resolve model ID string to an extractor instance."""
     from src.models.clip_extractor import CLIP_PRESETS, CLIPExtractor
     from src.models.ssl_extractor import SSL_MODELS, SSLExtractor
@@ -143,6 +144,10 @@ def _get_extractor(model_id: str, checkpoint, batch_size: int, device: str | Non
     if model_id == "cnn_supervised":
         from src.models.supervised_extractor import SupervisedCNNExtractor
         return SupervisedCNNExtractor(checkpoint=checkpoint, batch_size=batch_size, device=device)
+
+    if model_id == "clip_ft":
+        from src.models.clip_ft_extractor import CLIPFTExtractor
+        return CLIPFTExtractor(checkpoint=checkpoint, alpha=clip_alpha, batch_size=batch_size, device=device)
 
     if model_id in CLIP_PRESETS or model_id.startswith("clip_"):
         key = model_id if model_id in CLIP_PRESETS else model_id
@@ -229,6 +234,12 @@ def main() -> None:
         help="--model ar_igpt / ar_gpt only: GPT block whose hidden states are mean-pooled (default: best_layer of the run's layer_probe.json).",
     )
     parser.add_argument(
+        "--clip-alpha",
+        type=float,
+        default=1.0,
+        help="--model clip_ft only: WiSE-FT interpolation, alpha * fine-tuned + (1 - alpha) * original image tower.",
+    )
+    parser.add_argument(
         "--dataset",
         choices=["artbench", "wikiart"],
         default="artbench",
@@ -292,6 +303,7 @@ def main() -> None:
         mae_pool=args.mae_pool,
         vit_pool=args.vit_pool,
         ar_layer=args.ar_layer,
+        clip_alpha=args.clip_alpha,
     )
 
     # Build the transform from the extractor
