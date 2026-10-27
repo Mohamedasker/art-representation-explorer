@@ -38,6 +38,30 @@ We generate and compare image representations of the [ArtBench-10](https://githu
 | `dinov2_vitl14` | DINOv2 ViT-L/14 | Meta AI |
 | `dino_vitb16` | DINO ViT-B/16 | Meta AI (ImageNet) |
 
+### Models in the explorer
+
+The explorer ([layout](#layout-of-visualizationsexplorer-publish-it-week-by-week)) has one directory and one overview card per **model
+type**; a "Weights" menu inside every page switches between the weights of a type. Every model is embedded on both datasets
+(`representations/<dataset>_<slug>_{train,test,all}.npz`).
+"Code" says where the training / extraction code is: **main** = this branch, **branch** = `explorer-nudity-mae-simclr`
+(not merged into `main` yet; its README has a section per model with the exact recipes, and `docs/` has the run notes).
+
+| Explorer dir | Model type | Weights (file slug) | Embedding | Code |
+|---|---|---|---|---|
+| `resnet50/` | ResNet-50 | `cnn_supervised`: trained here from scratch, multi-task (style, genre, artist) · `resnet50_imagenet`: ImageNet, frozen | 2048-D pooled | main |
+| `autoencoder/` | Convolutional autoencoder | `autoencoder`: trained here to reconstruct the images, no labels | 1024-D pooled latent | main |
+| `mae/` | MAE ViT-B/16 (masked autoencoder) | `mae_imagenet` (Meta, frozen) · `mae_adapt_{artbench,wikiart}` (ImageNet MAE, pre-training continued on one dataset) · `mae_scratch_{artbench,wikiart}` (random init) | 768-D mean patch token | main |
+| `simclr/` | SimCLR ResNet-50 (contrastive) | `simclr_imagenet` (published v1, frozen) · `simclr_{artbench,wikiart}_<aug>` for the 8 augmentation sets of `configs/aug_sets.yaml` (16 runs, see [SimCLR](#simclr-representations-and-augmentation-sets)) | 2048-D pooled | main |
+| `dino/` | DINO / DINOv2 ViT-B | `dinov2_vitb14` (Meta, LVD-142M) · `dino_vitb16` (DINO v1, ImageNet-1k) · `dino_adapt_{artbench,wikiart}` (v1, ImageNet init, trained on one dataset) · `dino_scratch_{artbench,wikiart}` (v1, random init) | 768-D CLS (teacher for the trained ones) | extractors for the two Meta models: main; training of `dino_adapt/scratch`: branch |
+| `clip/` | CLIP ViT-B/32 | `clip_vitb32` (OpenAI, GELU build) · `clip_vitb32_qgelu` (OpenAI, exact model) · `clip_ft_{artbench,wikiart}` (image tower gently fine-tuned, text tower frozen) · `clip_ft_*_wise50` (50 % interpolation with the original, WiSE-FT) | 512-D image feature | `clip_vitb32`: main; the rest: branch |
+| `vit/` | ViT-B/16, supervised | `vit_imagenet` (timm, ImageNet-1k, frozen) · `vit_supervised` (trained here from scratch, same multi-task labels as the ResNet) · `vit_supervised_ft` (ImageNet init, fine-tuned on the art labels) | 768-D CLS | branch |
+| `ar/` | Autoregressive transformers | `ar_igpt` (iGPT: next-pixel prediction on 32 px palette images) · `ar_gpt` (VQ tokens + GPT) · `ar_vq` (VQ tokenizer latents, baseline) | 512 / 1024 / 512-D, mean of one probed block | branch |
+| `gan/` | GAN (StyleGAN2, trained here) | `gan_disc` (discriminator features) · `gan_enc` (inversion encoder: image -> latent w) | 512-D | branch |
+
+Only models whose code is on `main` can be rebuilt from this checkout; for the others the pages and embeddings already exist and
+`scripts/relink_explorer.py` / `rerender_explorer.py` should be run from the **branch** checkout, because its `src/visualization/variants.py`
+knows all of these model types (running them from `main` would reduce the navigation and overview cards to the ones above).
+
 ### Supported color variables
 
 | `--color` value | Description |
@@ -346,17 +370,87 @@ visualize(proj.coords, colorvar, paths=bundle.paths,
 
 ---
 
+## Scripts
+
+Everything is run as `python scripts/<name>.py` (add `--help` for the options); `scripts/slurm/` has the JURECA batch wrappers.
+The two-digit prefixes order the pipeline but are **not unique**: the branch `explorer-nudity-mae-simclr` has its own `19_`-`29_` scripts
+(listed at the end) that reuse numbers of scripts here, so rename one set when the branches are merged.
+
+**Data and features**
+
+| Script | What it does |
+|---|---|
+| `01_download_artbench.py`, `01_download_wikiart.py` | download and unpack the datasets (`data/`) |
+| `02_extract_features.py` | embed a dataset with a model alias (`--model`, see the table above) -> `representations/*.npz` |
+| `merge_splits.py` | merge the per-split embedding files (`_train`, `_test`) into one `_all` file per model and dataset |
+| `04_compute_color_profiles.py` | colour / texture statistics per image, for the colour-by options |
+| `09_build_attributes.py` | per-image attribute tables (metadata, CLIP content / mood / aesthetics, image statistics) -> `data/attributes/` |
+| `17_label_imagenet.py` | label every painting with ImageNet classes by CLIP zero-shot and add them as colour maps |
+| `15_flag_nudity.py`, `16_train_nudity_probe.py` | flag paintings with nudity (hidden in the explorer by default) and measure / train the detectors |
+
+**Plots and analysis**
+
+| Script | What it does |
+|---|---|
+| `03_visualize.py`, `05_visualize_by_class.py`, `06_umap_pca_report.py` | static / HTML UMAP, t-SNE and PCA plots, per-class batches, one-page PCA + UMAP report |
+| `18_imagenet_agreement.py` | do the embedding spaces organise paintings by ImageNet class? (agreement table per model) |
+| `15_simclr_summary.py` | table of all SimCLR runs (run dir, wandb, epochs, kNN / linear-probe accuracy) |
+| `17_compare_simclr.py` | quantitative comparison of the SimCLR augmentation variants (static part + invariance part) |
+| `18_investigate_nocolor.py` | why the always-grayscale SimCLR (`no_color`) predicts colour statistics better than the others |
+| `19_grayscale_eval.py` | style accuracy of the SimCLR variants on grayscale versus colour input |
+| `14_preview_augmentations.py` | grids of original + sampled views for every augmentation set -> `visualizations/aug_sets/` |
+| `21_interpolate_autoencoder.py` | interpolate between two paintings in the autoencoder's latent space and decode the points on the line (new images) |
+
+**Training** (all multi-GPU DDP + wandb, run directories in `runs/`, resumable; batch wrappers `scripts/slurm/train_*.sbatch`)
+
+| Script | Trains |
+|---|---|
+| `07_train_autoencoder.py` | convolutional autoencoder on ArtBench + WikiArt (train splits) |
+| `10_train_cnn.py` | supervised ResNet-50 (style / genre / artist heads) |
+| `12_train_mae.py` | MAE ViT-B/16 on one dataset (from ImageNet weights or from scratch) |
+| `13_train_simclr.py` | SimCLR ResNet-50 on one dataset with a named augmentation set |
+
+**Explorer** (pages in `visualizations/explorer/`, see its [layout](#layout-of-visualizationsexplorer-publish-it-week-by-week))
+
+| Script | What it does |
+|---|---|
+| `08_build_explorer.py` | the main build: projections (UMAP, t-SNE, PCA), k-means, colour maps and the pages of one representation, shared thumbnails / meta, `landing.json` |
+| `11_build_featuremaps.py` | data and page of the feature-map viewer (`featuremaps/`) |
+| `20_build_lecture1.py` | the lecture-1 page with the toy fish data (`lecture1/index.html`) |
+| `22_reorganize_explorer.py` | one-off: migrate a flat explorer output into the per-model directories + `shared/` layout |
+| `relink_explorer.py` | rewrite the navigation (model types, weights, augmentation sets) in all existing pages after new pages were built; no recomputation |
+| `rerender_explorer.py` | re-render all pages with the current HTML/JS templates from the data already embedded in them (e.g. after a design change or new nudity flags) |
+| `check_explorer_pages.py` | print which kinds of pages are still missing (empty = everything built) |
+| `orchestrate_explorer.py` | keeps submitting explorer builds until every page of the chosen datasets exists, then refreshes the overview |
+| `serve_explorer.py` | local web server for the explorer with caching switched off (use instead of `python -m http.server`) |
+
+**Batch wrappers** (`scripts/slurm/`): `train_{autoencoder,cnn,mae,simclr}.sbatch` training; `embed_splits.sbatch`, `embed_simclr.sbatch`,
+`mae_embeddings.sbatch`, `ae_embeddings_explorer.sbatch`, `cnn_embeddings_explorer.sbatch` embeddings (+ explorer pages);
+`explorer_build.sbatch`, `explorer_sets.sh`, `submit_all_pages.sh`, `orchestrate_explorer.sh`, `attrs_and_explorer.sh` explorer builds;
+`mae_featuremaps_explorer.sbatch`, `mae_scratch_post.sbatch` MAE feature maps and post-processing of the from-scratch runs;
+`submit_simclr_phase2.sh` queue the 14 augmentation-variant runs; `compare_simclr.sbatch` the GPU part of `17_compare_simclr.py`.
+
+**Only on the branch `explorer-nudity-mae-simclr`** (code of the models marked "branch" above; numbers collide with the scripts above)
+
+| Script | What it does |
+|---|---|
+| `19_train_vit.py` | supervised ViT-B/16 (from scratch or ImageNet-initialised) with the same multi-task labels as the ResNet |
+| `20_train_gan.py`, `25_train_gan_encoder.py` | StyleGAN2 on both datasets (train splits, 128 px) and its inversion encoder (image -> latent w) |
+| `20_prepare_ar_data.py`, `21_train_vq.py`, `22_tokenize_ar.py`, `23_train_ar.py`, `24_probe_ar_layers.py` | autoregressive pipeline: 128 px pixel cache, VQ tokenizer, tokenise all images, GPT on the tokens, layer-by-layer style probe to choose the embedding layer |
+| `26_prepare_igpt.py`, `27_train_igpt.py` | iGPT: 512-colour palette + pixel tokens, and the next-pixel transformer |
+| `28_train_clip_ft.py`, `29_eval_clip_ft.py` | gentle CLIP fine-tune (text tower frozen, WiSE-FT blends) and its fit-versus-forgetting evaluation |
+| `29_cache_images.py`, `29_train_dino.py` | 256 px uint8 image cache and DINO v1 ViT-B/16 training (adapted / from scratch) |
+| `slurm/train_{vit,gan,gan_encoder,vq,ar,igpt,clip_ft,dino}.sbatch`, `slurm/embed_{vit,gan,ar,clip_ft}.sbatch`, `slurm/dino_embeddings.sbatch` | batch wrappers for the above |
+
+---
+
 ## Repository layout
 
 ```
 art-representation-explorer/
-├── scripts/                 # Entry-point CLI scripts
-│   ├── 01_download_artbench.py
-│   ├── 01_download_wikiart.py
-│   ├── 02_extract_features.py
-│   ├── 03_visualize.py
-│   ├── 04_compute_color_profiles.py
-│   └── 20_build_lecture1.py     # lecture-1 page (fish)
+├── scripts/                 # Entry-point CLI scripts and slurm/ batch wrappers (see "Scripts" above)
+├── configs/                 # augmentation sets (aug_sets.yaml)
+├── docs/                    # run notes and result tables
 ├── src/
 │   ├── datasets/
 │   │   ├── artbench.py      # ArtBench PyTorch Dataset
