@@ -2,12 +2,13 @@
 Self-contained interactive HTML explorer for a set of embedded images.
 
 One page shows a 2D projection of the samples on a zoomable canvas.  Hovering
-a point shows the original image (a thumbnail stored next to the page), its
+a point shows the original image (a thumbnail from ../shared/thumbs/), its
 art style and cluster membership; clicking pins it.  Dropdowns switch between
 projections, k-means cluster counts and cluster spaces, and the colouring.
 
 The page is plain HTML + canvas + vanilla JS (no CDN), so it works offline.
-Keep it next to the ``thumbs/`` and ``meta/`` folders it references.
+The page sits one level below the explorer root (``<root>/<model>/<page>.html``) and references ``<root>/shared/thumbs``
+and ``<root>/shared/meta``; see src/visualization/variants.py for the layout.
 """
 
 from __future__ import annotations
@@ -166,15 +167,15 @@ button:hover { border-color:#666; }
 </main>
 __META_SCRIPT__<script>
 // Per-image data that is the same for every model of a dataset (labels, thumbnails, palettes, attributes, ...) lives
-// once in meta/<name>.js, loaded above and cached by the browser across pages.  The page keeps its sample indices
+// once in shared/meta/<name>.js, loaded above and cached by the browser across pages.  The page keeps its sample indices
 // (D.idx) and selects its rows from it here.
 function hydrate(d) {
   if (!d.meta) return d;
   const M = window.EXPLORER_META;
   if (!M || M.name !== d.meta) {
     document.body.insertAdjacentHTML("afterbegin", `<p style="padding:16px;color:#f88">Could not load ` +
-      `meta/${d.meta}.js: keep the meta/ folder next to this page.</p>`);
-    throw new Error("missing meta/" + d.meta + ".js");
+      `shared/meta/${d.meta}.js: keep the shared/ folder next to the model folders.</p>`);
+    throw new Error("missing shared/meta/" + d.meta + ".js");
   }
   const ix = d.idx, pick = a => ix.map(i => a[i]);
   for (const k of d.meta_keys) {
@@ -264,7 +265,7 @@ if ((D.sets || []).length > 1) {                 // other sample sets / the full
   $("setsel").value = (D.sets.find(x => x.current) || D.sets[0]).href;
   $("setsel").addEventListener("change", () => { location.href = $("setsel").value; });
 }
-$("nav").innerHTML = `<a href="index.html">&#8962; overview</a> &middot; ` + D.siblings.map(s =>
+$("nav").innerHTML = `<a href="../index.html">&#8962; overview</a> &middot; ` + D.siblings.map(s =>
   `<a href="${s.href}" class="${s.current ? "cur" : ""}">${s.name}</a>`).join("");
 if ((D.weights || []).length > 1) {             // other weights of this model type (e.g. MAE: ImageNet / adapted / from scratch)
   $("wtwrap").hidden = false;
@@ -277,7 +278,7 @@ if ((D.variants || []).length > 1) {            // variants of this model (e.g. 
   $("varsel").addEventListener("change", () => { location.href = $("varsel").value; });
 }
 if (D.siblings.length > 8) {                     // many models: a drop-down instead of a link per model
-  $("nav").innerHTML = `<a href="index.html">&#8962; overview</a> &middot; <select id="navsel" title="other model types of this dataset">` +
+  $("nav").innerHTML = `<a href="../index.html">&#8962; overview</a> &middot; <select id="navsel" title="other model types of this dataset">` +
     D.siblings.map(s => `<option value="${s.href}"${s.current ? " selected" : ""}>${s.name}</option>`).join("") + `</select>`;
   $("navsel").addEventListener("change", () => { location.href = $("navsel").value; });
 }
@@ -934,27 +935,28 @@ setBounds(); fitCanvas(); resetView(); draw(); { const f0 = firstVisible(); if (
 """
 
 
-# ── per-image data shared by all pages of a dataset (meta/<name>.js) ──────────
+# ── per-image data shared by all pages of a dataset (shared/meta/<name>.js) ──────────
 # Every model's pages of one dataset show the same images, so their labels, thumbnails, palettes, colour themes,
-# attributes, ... are identical.  They are written once per dataset to meta/<prefix>-<content hash>.js and each page
+# attributes, ... are identical.  They are written once per dataset to shared/meta/<prefix>-<content hash>.js and each page
 # keeps only its sample indices ``idx`` into it.  The hash in the name means a page always loads exactly the data it
 # was checked against, even after the meta of a dataset changes (e.g. new attributes).
 
 META_KEYS = ("lab", "files", "thumbs", "pal_c", "pal_w", "light", "chroma", "dom_ref", "year", "nsfw", "theme")
+META_DIR = Path("shared") / "meta"                  # below the explorer root
 _META_PREFIX = "window.EXPLORER_META="
 _META_CACHE: dict[str, dict] = {}
 
 
 def write_meta(out_dir: str | Path, prefix: str, fields: dict) -> str:
     """Write the shared per-image ``fields`` of ALL images of a dataset (row i = image i of the representation file,
-    i.e. the page indices ``idx``) to ``out_dir``/meta; returns the meta name to pass to :func:`write_explorer`."""
+    i.e. the page indices ``idx``) to ``out_dir``/shared/meta; returns the meta name to pass to :func:`write_explorer`."""
     m = {k: fields[k] for k in META_KEYS if fields.get(k) is not None}
     m["attrs"] = {a["key"]: {x: a[x] for x in ("kind", "lo", "hi", "b64") if x in a}
                   for a in fields.get("attrs") or [] if "b64" in a}
     body = json.dumps(m, separators=(",", ":"))
     name = f"{prefix}-{hashlib.sha1(body.encode()).hexdigest()[:10]}"
     m.update(name=name, n=len(m["files"]))
-    path = Path(out_dir) / "meta" / f"{name}.js"
+    path = Path(out_dir) / META_DIR / f"{name}.js"
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_META_PREFIX + json.dumps(m, separators=(",", ":")) + ";\n")
@@ -964,7 +966,7 @@ def write_meta(out_dir: str | Path, prefix: str, fields: dict) -> str:
 
 def load_meta(out_dir: str | Path, name: str) -> dict:
     if name not in _META_CACHE:
-        text = (Path(out_dir) / "meta" / f"{name}.js").read_text()
+        text = (Path(out_dir) / META_DIR / f"{name}.js").read_text()
         _META_CACHE[name] = json.loads(text[len(_META_PREFIX):].rstrip().rstrip(";"))
     return _META_CACHE[name]
 
@@ -1050,16 +1052,17 @@ def hydrate(payload: dict, out_dir: str | Path) -> dict:
 
 
 def write_explorer(path: str | Path, payload: dict, title: str, meta: str | None = None) -> Path:
-    """Write the explorer page for ``payload`` (see scripts/08_build_explorer.py).  With ``meta`` (from
-    :func:`write_meta`, in the page's directory) the per-image fields found there are left out of the page."""
+    """Write the explorer page for ``payload`` (see scripts/08_build_explorer.py) to ``<root>/<model dir>/<page>.html``.
+    With ``meta`` (from :func:`write_meta`, in the explorer root ``<root>`` = the page's grandparent) the per-image
+    fields found there are left out of the page."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if "style_colors" not in payload and payload.get("classes"):
         from src.visualization.style_colors import style_colors, style_years
         payload = {**payload, "style_colors": style_colors(payload["classes"]), "style_years": style_years(payload["classes"])}
     if meta:
-        payload = split_meta(payload, path.parent, meta)
-    script = f'<script src="meta/{payload["meta"]}.js"></script>\n' if payload.get("meta") else ""
+        payload = split_meta(payload, path.parent.parent, meta)
+    script = f'<script src="../shared/meta/{payload["meta"]}.js"></script>\n' if payload.get("meta") else ""
     html = HTML_TEMPLATE.replace("__TITLE__", title).replace("__META_SCRIPT__", script)
     path.write_text(html.replace("__DATA__", json.dumps(payload, separators=(",", ":"))))
     return path

@@ -76,6 +76,44 @@ def member_of(stem: str) -> tuple[str, str] | None:
     return None
 
 
+# ── where the pages live ──────────────────────────────────────────────────────
+# visualizations/explorer/
+#   index.html, models.html          overview (root)
+#   shared/thumbs, shared/meta       per-image files used by every model page
+#   <model dir>/<stem>[__key].html   the pages of one model type (all its weights, both datasets); one directory per
+#                                    model so that a course can publish them week by week
+#   lecture1/, featuremaps/          stand-alone viewers;  cache/  build intermediates (not needed to view the pages)
+# A model page links to the shared files and to other pages with paths relative to itself (it sits one level below
+# the root), so the root can be uploaded or served from anywhere.
+_DIR_OF_FIRST_WORD = {"cnn": "resnet50", "dinov2": "dino"}       # supervised ResNet-50 weights, DINO v1 + v2 share a family
+
+
+def model_dir(stem: str) -> str:
+    """Directory of the page stem's model type = the family its weights belong to in the explorer's menus (``mae``,
+    ``simclr``, ``clip``, ``dino`` ...): the first word of the model name, so it does not depend on which model types
+    this file lists in FAMILIES (``ar_vq`` -> ``ar``, ``gan_enc`` -> ``gan``, ``dinov2_vitb14`` -> ``dino``)."""
+    m = _STEM.match(stem)
+    if not m:
+        return "other"
+    word = m.group(2).split("_")[0]
+    return _DIR_OF_FIRST_WORD.get(word, word)
+
+
+def page_name(stem: str, key: str = "s1") -> str:
+    """File name of view ``key`` of a representation (``s1`` = first sample, the default page)."""
+    return f"{stem}.html" if key == "s1" else f"{stem}__{key}.html"
+
+
+def page_path(stem: str, key: str = "s1") -> str:
+    """Path of the page relative to the explorer root."""
+    return f"{model_dir(stem)}/{page_name(stem, key)}"
+
+
+def page_href(from_stem: str, to_stem: str, key: str = "s1") -> str:
+    """Link from a page of ``from_stem`` to a page of ``to_stem`` (same file name when both are in one directory)."""
+    return page_name(to_stem, key) if model_dir(from_stem) == model_dir(to_stem) else f"../{page_path(to_stem, key)}"
+
+
 def family_title(fam: str) -> str:
     return next((t for k, t, _m in FAMILIES if k == fam), fam)
 

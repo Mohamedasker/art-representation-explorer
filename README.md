@@ -240,6 +240,25 @@ simclr_final.pt). Results table (run dir, wandb run, probe accuracy): `docs/simc
 
 ---
 
+## Layout of `visualizations/explorer/` (publish it week by week)
+
+```
+index.html, models.html        overview (entry point), all models / all weights
+shared/thumbs/, shared/meta/   per-image files used by every model page - upload once, with the first week
+<model>/                       one directory per model type: resnet50, autoencoder, mae, simclr, clip, dino (DINO v1 + DINOv2), vit, gan, ar
+    artbench_<weights>_all.html, wikiart_<weights>_all.html, ... (all its weights, both datasets, every sample / split view)
+lecture1/index.html            lecture 1: toy fish data
+featuremaps/                   feature-map viewer (own data)
+cache/                         build intermediates for scripts/08_build_explorer.py - not needed to view the pages, do not upload
+```
+
+A model page links to `../shared/` and to other pages with relative paths, so any subset of model folders can be uploaded next
+to `shared/` and `index.html`; the navigation entries of models that are not uploaded yet just lead nowhere until their week
+(the overview's cards likewise). `src/visualization/variants.py` (`model_dir`, `page_path`) defines the mapping.
+Re-running `scripts/08_build_explorer.py` / `rerender_explorer.py` / `relink_explorer.py` keeps this layout.
+
+---
+
 ## Explicit images are hidden in the explorer by default
 
 Paintings with nudity are flagged automatically and **hidden by default** in every explorer page, the overview and the feature-map
@@ -263,8 +282,43 @@ python scripts/rerender_explorer.py                    # put the flags into the 
 
 `scripts/08_build_explorer.py` reads `data/nudity/flags.npz` for every new page (`src/metadata/nudity.py`), so pages of new models
 need no extra step as long as the flags exist. `data/` is not versioned: regenerate the flags with the commands above.
-**The hiding is done in the page only**: the flagged thumbnail files are still in `visualizations/explorer/thumbs/` (and in
+**The hiding is done in the page only**: the flagged thumbnail files are still in `visualizations/explorer/shared/thumbs/` (and in
 `featuremaps/data/`), so do not publish those folders as they are if the audience must not be able to reach them.
+
+---
+
+## Lecture 1 page: fish (k-NN, interpolation, PCA, t-SNE, UMAP)
+
+`visualizations/explorer/lecture1/index.html` (card "viewer 3" on the overview) explains the methods on a toy data set instead of paintings:
+150 fish, each an ellipse described by **length** and **thickness** (the "3 numbers" version adds the **tail length**, long vs short).
+The cloud has a major axis of variation (size: long and thick together) and a minor one (slender vs stocky).
+
+| tab | what it shows |
+|-----|---------------|
+| Explore · k-NN · interpolation | the fish as a scatter plot with the explorer's controls: projection (feature planes, a rotatable 3-D view, PCA, t-SNE, UMAP), colour by, hover / pin, legend isolation; *nearest neighbours* (fish strip, neighbours on the map, how many stay neighbours on the map) and *interpolate A → B* (the fish drawn from the interpolated numbers next to the nearest real fish) |
+| PCA step by step | nine fish: data → mean → centred data (animated, with the matrices) → covariance matrix (each entry built from signed rectangles, click an entry) → eigenvectors (variance of the projections as a function of direction) → transformation Z = X_c W (rotation, keep k components) |
+| t-SNE step by step | p(j\|i) with the perplexity-calibrated Gaussian → similarity matrix → initialisation (PCA / random) → Student-t similarities q → gradient (pull / push arrows, momentum update with the numbers) → iterate with early exaggeration until convergence (KL and k-NN preservation curves) → result and placing a *new* fish |
+| UMAP step by step | k nearest neighbours and ρ → fuzzy weights → fuzzy union (graph) → spectral / PCA / random initialisation → SGD with attraction along edges and repulsion from random fish (a, b from min_dist) → result and placing a *new* fish |
+
+A **fish population** menu in the header switches between this data set and a second one with the same 150 fish, 30 of which are replaced by a
+**cluster of slender fish with extremely long tails** (tails of 16-28 cm vs 3-12 cm): a clearly separated island in the space that UMAP and t-SNE show as
+their own group (colour by *population* to see it; in the "2 numbers" version only their slenderness separates them, the tails are drawn but not measured).
+
+Three more populations have **four distinct groups**: small short fish, tall narrow fish (taller than long), round fish with a short tail and round fish with a
+long tail, at three separations (*clearly separated*, *close together*, *overlapping*). The two round groups have the same body, so with "2 numbers" they cannot be
+told apart and only the tail (3 numbers) separates them. Populations are defined in `src/visualization/lecture1/__init__.py` (`GROUPS4`, `SEPARATIONS`).
+
+Everything except the fish themselves is computed in the browser (`src/visualization/lecture1/algos.js`), so perplexity, `n_neighbors`,
+`min_dist`, initialisation, learning rate and early exaggeration can be changed and the run is redone. The page is a single HTML file (no CDN).
+
+```bash
+python scripts/20_build_lecture1.py                       # -> visualizations/explorer/lecture1/index.html
+python scripts/20_build_lecture1.py --n-fish 200 --seed 3
+```
+
+The JS implementations were checked against numpy / scikit-learn / umap-learn on the same fish: PCA (covariance, eigenvalues, eigenvectors),
+t-SNE affinities (max rel. difference 7e-6) and gradient (exact), final t-SNE KL (0.161 vs 0.169 for scikit-learn's exact solver),
+UMAP `a`, `b` and fuzzy graph (identical up to ties from the 0.1 cm rounding) and k-NN trustworthiness of the UMAP layout (0.988 vs 0.989).
 
 ---
 
@@ -301,7 +355,8 @@ art-representation-explorer/
 │   ├── 01_download_wikiart.py
 │   ├── 02_extract_features.py
 │   ├── 03_visualize.py
-│   └── 04_compute_color_profiles.py
+│   ├── 04_compute_color_profiles.py
+│   └── 20_build_lecture1.py     # lecture-1 page (fish)
 ├── src/
 │   ├── datasets/
 │   │   ├── artbench.py      # ArtBench PyTorch Dataset
@@ -315,7 +370,8 @@ art-representation-explorer/
 │   ├── reduction/
 │   │   └── dimensionality.py   # PCA / UMAP / t-SNE wrappers
 │   ├── visualization/
-│   │   └── scatter.py          # Matplotlib + Plotly scatter
+│   │   ├── scatter.py          # Matplotlib + Plotly scatter
+│   │   └── lecture1/           # lecture-1 page: fish generator, HTML/JS (PCA, t-SNE, UMAP written out step by step)
 │   └── coloring/
 │       ├── label_colors.py     # Class label → colour
 │       ├── color_profile.py    # Hue, saturation, brightness, colorfulness

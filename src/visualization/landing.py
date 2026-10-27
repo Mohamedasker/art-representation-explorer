@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .variants import FAMILIES, family_order, family_title, member_of, variant_info
+from .variants import FAMILIES, family_order, family_title, member_of, model_dir, page_path, variant_info
 
 def _simclr_info() -> list:
     """Overview entries for the SimCLR models: frozen ImageNet weights + one per training dataset (its augmentation-set
@@ -152,6 +152,9 @@ footer { margin-top:48px; color:var(--muted); font-size:12.5px; }
   <a class="vcard" href="featuremaps/index.html"><small>viewer 2</small><h3>Feature-map viewer</h3>
     <p>Look inside the networks: the channel activations, principal-component colour maps and activation / attention overlays of the
        trained ResNet-50, the ImageNet ResNet-50, the autoencoder, DINOv2 and CLIP, layer by layer, for a painting of your choice.</p><span>Open the feature-map viewer &rarr;</span></a>
+  <a class="vcard" href="lecture1/index.html"><small>viewer 3</small><h3>Lecture 1 &middot; fish</h3>
+    <p>A toy data set of fish (ellipses described by length and thickness) for the first lecture: nearest neighbours and interpolation in the same viewer, plus
+       step-by-step walk-throughs of PCA (with the matrices), t-SNE and UMAP, in 2-D and 3-D.</p><span>Open the lecture page &rarr;</span></a>
 </section>
 <div id="explorer"></div>
 <div class="tabrow"><div class="tabs" id="tabs"></div><a class="allbtn" id="allbtn" href="models.html"></a></div>
@@ -286,9 +289,11 @@ def write_index(path: str | Path, built: list[dict], n_samples: int) -> Path:
         key, title, family, desc = _kind(b["stem"])
         mo = member_of(b["stem"])                       # model type + weights (see variants.FAMILIES)
         wl = next((lb for fk, _t, ms in FAMILIES if mo and fk == mo[0] for k, lb in ms if k == mo[1]), title)
-        entries.append({"stem": b["stem"], "href": f"{b['stem']}.html", "dataset": ds, "model": key,
+        sets = [{**s, "href": s["href"] if "/" in s["href"] else f"{model_dir(b['stem'])}/{s['href']}"}
+                for s in b.get("sets_links", [])]            # links of a page's own directory -> relative to the root
+        entries.append({"stem": b["stem"], "href": page_path(b["stem"]), "dataset": ds, "model": key,
                         "fam": mo[0] if mo else key, "fam_title": family_title(mo[0]) if mo else title, "wlabel": wl,
-                        "title": title, "family": family, "desc": desc, "sets": b.get("sets_links", []),
+                        "title": title, "family": family, "desc": desc, "sets": sets,
                         **b["summary"]})
     order = {k: i for i, (k, *_r) in enumerate(MODEL_INFO)}
     entries.sort(key=lambda e: (e["dataset"], family_order(e["stem"]), e["stem"]))     # cards: model types in order, default weights first

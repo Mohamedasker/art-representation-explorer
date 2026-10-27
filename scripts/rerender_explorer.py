@@ -4,9 +4,9 @@ Re-render the explorer pages with the current HTML/JS templates (src/visualizati
 landing.py) WITHOUT recomputing anything: the data block embedded in each existing page is reused.
 
 Use this after changing only the page design / interaction code.  Per-image data shared by all models of a dataset
-is (re)written once to meta/ next to the pages (see write_meta in src/visualization/explorer.py).
+is (re)written once to shared/meta/ (see write_meta in src/visualization/explorer.py).
 
-    python scripts/rerender_explorer.py                       # rewrite visualizations/explorer/*.html in place
+    python scripts/rerender_explorer.py                       # rewrite visualizations/explorer/<model>/*.html in place
     python scripts/rerender_explorer.py --out-dir /tmp/test   # write the re-rendered pages elsewhere
 """
 
@@ -22,8 +22,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.metadata.nudity import load_flags
-from src.visualization.explorer import hydrate, write_explorer, write_meta
+from src.visualization.explorer import META_DIR, hydrate, write_explorer, write_meta
 from src.visualization import landing
+from src.visualization.variants import page_path
 
 
 def current_attr_keys(page_stem: str, attr_dir: Path):
@@ -124,20 +125,25 @@ def main() -> None:
     ap.add_argument("--out-dir", default=None, help="default: overwrite in place")
     ap.add_argument("--attr-dir", default="data/attributes", help="attributes that pages may still contain")
     ap.add_argument("--no-index", action="store_true", help="leave index.html alone")
+    ap.add_argument("--index-only", action="store_true", help="only rewrite index.html and models.html")
     args = ap.parse_args()
     src, dst = Path(args.dir), Path(args.out_dir or args.dir)
     dst.mkdir(parents=True, exist_ok=True)
     n = 0
     metas: dict[str, str] = {}               # dataset + split -> meta/<name>.js, made from its full ("__all") page
     # full pages first (they define the shared per-image meta of their dataset), index last
-    for page in sorted(src.glob("*.html"), key=lambda q: (q.name == "index.html", not q.stem.endswith("__all"), q.name)):
+    pages = [*src.glob("[a-z]*/*_*.html"), src / "index.html"]       # model pages (shared/ lecture1/ featuremaps/ have none)
+    pages = [q for q in pages if q.exists() and (q.name == "index.html" or re.match(r"(artbench|wikiart)_", q.name))]
+    if args.index_only:
+        pages = [q for q in pages if q.name == "index.html"]
+    for page in sorted(pages, key=lambda q: (q.name == "index.html", not q.stem.endswith("__all"), q.name)):
         text = page.read_text()
         if page.name == "index.html":
             if args.no_index:
                 continue
             ns = re.search(r"a random sample of ([\d,]+) images", text)
             entries = [json.loads(f.read_text()) for f in sorted((src / "cache").glob("*__space/landing.json"))
-                       if (src / f"{f.parent.name.removesuffix('__space')}.html").exists()]
+                       if (src / page_path(f.parent.name.removesuffix('__space'))).exists()]
             if not entries:                       # older pages without landing.json: keep the existing data block
                 m = re.search(r"const D = (\{.*\});\nconst \$ = id", text, re.S)
                 if not m:
@@ -175,10 +181,10 @@ def main() -> None:
             group = f"{base.split('_')[0]}_{base.rsplit('_', 1)[-1]}"
             if group not in metas and page.stem.endswith("__all") and data["idx"] == list(range(len(data["idx"]))):
                 metas[group] = write_meta(dst, group, data)
-            write_explorer(dst / page.name, data, title.group(1) if title else page.stem, meta=metas.get(group))
+            write_explorer(dst / page.parent.name / page.name, data, title.group(1) if title else page.stem, meta=metas.get(group))
         n += 1
         print("re-rendered", page.name)
-    for f in (dst / "meta").glob("*.js"):        # meta of earlier renders that no page uses any more
+    for f in (dst / META_DIR).glob("*.js"):      # meta of earlier renders that no page uses any more
         if f.stem not in metas.values():
             f.unlink()
             print("removed unused", f.relative_to(dst))

@@ -173,7 +173,7 @@ def sheets(d: dict, out_dir: Path, thumb_dir: Path, n: int = 24, seed: int = 0) 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--datasets", nargs="+", default=["artbench", "wikiart"])
-    ap.add_argument("--thumb-dir", default="visualizations/explorer/thumbs")
+    ap.add_argument("--thumb-dir", default="visualizations/explorer/shared/thumbs")
     ap.add_argument("--flags-only", action="store_true", help="skip the detectors; reuse data/nudity/scores_*.npz")
     ap.add_argument("--nn-thr", type=float, default=DEFAULT_THRESHOLDS["nn"], help="NudeNet confidence threshold")
     ap.add_argument("--clip-thr", type=float, default=DEFAULT_THRESHOLDS["clip"], help="CLIP nude-probability threshold")

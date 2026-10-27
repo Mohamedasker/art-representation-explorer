@@ -13,9 +13,12 @@ In the page you can pick the projection, the cluster space (embedding / PCA 95%)
 colouring (cluster or art style); hover a point to see the original image.
 
 Output layout (copy the whole folder to view it locally):
-  <out-dir>/<stem>.html            one page per representation, linked to each other
-  <out-dir>/thumbs/<hash>.jpg      thumbnails, shared by pages that sample the same images
-  <out-dir>/cache/<stem>/*.npy     projections / clusters, reused when settings are unchanged
+  <out-dir>/index.html, models.html     overview pages
+  <out-dir>/<model>/<stem>.html         one page per representation, linked to each other; one directory per model
+                                        type (mae/, simclr/, clip/ ...), see src/visualization/variants.py
+  <out-dir>/shared/thumbs/<hash>.jpg    thumbnails, shared by pages that sample the same images
+  <out-dir>/shared/meta/*.js            per-image data shared by the pages of a dataset
+  <out-dir>/cache/<stem>/*.npy          projections / clusters, reused when settings are unchanged (not needed to view)
 
 Usage examples
 --------------
@@ -64,7 +67,7 @@ from src.reduction.dimensionality import umap
 from src.visualization.explorer import write_explorer, write_meta
 from src.visualization.style_colors import style_colors
 from src.visualization.landing import write_index
-from src.visualization.variants import nav_lists, variant_info
+from src.visualization.variants import nav_lists, page_href, page_name, page_path, variant_info
 
 _SKIP_SUBSTRINGS = ("color_profiles",)
 
@@ -307,7 +310,8 @@ SUBSET_ORDER = ["s1", "s2", "train", "test", "all"]
 
 
 def set_page(stem: str, key: str) -> str:
-    return f"{stem}.html" if key == "s1" else f"{stem}__{key}.html"
+    """Page of view ``key``, relative to the output directory."""
+    return page_path(stem, key)
 
 
 def splits_of(paths) -> np.ndarray:
@@ -392,10 +396,10 @@ def compute_space(repr_path: Path, args, out_dir: Path) -> dict:
             clusters[sname][k] = cache.get(f"kmeans_{sname}_k{k}",
                                            lambda: _kmeans(XS, k, args.seed, 2 if big else 5)).astype(int)
 
-    thumbs = make_thumbs(bundle.paths, out_dir / "thumbs", args.thumb_size, args.workers)
+    thumbs = make_thumbs(bundle.paths, out_dir / "shared" / "thumbs", args.thumb_size, args.workers)
     years = [year_from_name(p) for p in bundle.paths]
     print(f"  dates from file names: {sum(y is not None for y in years)} / {n}")
-    pal = load_palettes(out_dir / "thumbs", thumbs, out_dir / "cache" / f"palettes_c{args.palette_colors}.npz",
+    pal = load_palettes(out_dir / "shared" / "thumbs", thumbs, out_dir / "cache" / f"palettes_c{args.palette_colors}.npz",
                         args.palette_colors, args.workers)
     ref = reference_palette(pal["colors"], pal["weights"], args.palette_refs, args.seed)
     hist = palette_histograms(pal["colors"], pal["weights"], ref["centers_lab"])
@@ -437,7 +441,7 @@ def shared_fields(S: dict, idx: np.ndarray) -> dict:
     return {
         "lab": S["lab"][idx].tolist(),
         "files": [Path(str(p)).name for p in S["bundle"].paths[idx]],
-        "thumbs": [f"thumbs/{S['thumbs'][i]}" for i in idx],
+        "thumbs": [f"../shared/thumbs/{S['thumbs'][i]}" for i in idx],     # relative to a page (one level below the root)
         "year": years if any(y is not None for y in years) else None,
         "pal_c": _pack(pal["colors"]).tolist(), "pal_w": r(pal["weights"], 2),
         "light": r(pal["lightness"], 1), "chroma": r(pal["chroma"], 1),
@@ -555,8 +559,8 @@ def main() -> None:
         # THIS run plus representations whose page already exists from an earlier run
         known = set(by_stem) | {q.stem for q in Path(args.repr_dir).glob("*.npz")}
         avail = lambda o: (b["key"] in [k for k, *_ in views[o]]) if o in views else (out_dir / set_page(o, b["key"])).exists()
-        pl.update(nav_lists(stem, b["key"], known, avail, lambda o: set_page(o, b["key"])))
-        pl["sets"] = [{"label": lb, "href": set_page(stem, k), "current": k == b["key"]} for k, lb, _ in views[stem]]
+        pl.update(nav_lists(stem, b["key"], known, avail, lambda o: page_href(stem, o, b["key"])))
+        pl["sets"] = [{"label": lb, "href": page_name(stem, k), "current": k == b["key"]} for k, lb, _ in views[stem]]
         b["sets_links"] = pl["sets"]
         p = write_explorer(out_dir / b["page"], pl, f"Explorer · {stem}", meta=b["meta"])
         print(f"Explorer written -> {p}")

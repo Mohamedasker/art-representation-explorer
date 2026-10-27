@@ -22,6 +22,7 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
+from src.visualization.variants import page_path
 
 
 def expected_pages(npz: Path, n_samples: int = 10000) -> list[str]:
@@ -40,7 +41,7 @@ def expected_pages(npz: Path, n_samples: int = 10000) -> list[str]:
             keys.append(name)
     if ns < n:
         keys.append("all")
-    return [f"{stem}.html" if k == "s1" else f"{stem}__{k}.html" for k in keys]
+    return [page_path(stem, k) for k in keys]
 
 
 def missing_models(datasets: list[str], out: Path) -> list[Path]:

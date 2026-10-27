@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.visualization.variants import family_order, nav_lists
+from src.visualization.variants import family_order, nav_lists, page_href
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--dir", default="visualizations/explorer")
@@ -25,14 +25,10 @@ d = Path(ap.parse_args().dir)
 
 PAGE = re.compile(r"^(?P<stem>(?:artbench|wikiart)_.+?_(?:all|train|test))(?:__(?P<key>[a-z0-9]+))?\.html$")
 pages: dict[tuple[str, str], Path] = {}              # (stem, key) -> file
-for f in d.glob("*.html"):
+for f in d.glob("*/*.html"):                          # <model dir>/<page>; lecture1/ and featuremaps/ do not match
     m = PAGE.match(f.name)
     if m:
         pages[(m["stem"], m["key"] or "s1")] = f
-
-
-def href(stem: str, key: str) -> str:
-    return f"{stem}.html" if key == "s1" else f"{stem}__{key}.html"
 
 
 def put(text: str, name: str, value: list) -> str:
@@ -46,7 +42,7 @@ def put(text: str, name: str, value: list) -> str:
 stems = sorted({s for s, _ in pages}, key=lambda s: (family_order(s), s))
 n = 0
 for (stem, key), f in pages.items():
-    nl = nav_lists(stem, key, stems, lambda o: (o, key) in pages, lambda o: href(o, key))
+    nl = nav_lists(stem, key, stems, lambda o: (o, key) in pages, lambda o: page_href(stem, o, key))
     text = f.read_text()
     new = text
     if '"siblings":[' in text:
