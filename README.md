@@ -31,7 +31,9 @@ We generate and compare image representations of the [ArtBench-10](https://githu
 | `resnet50` + `--checkpoint` | ResNet-50 | Fine-tuned on ArtBench-10 |
 | `efficientnet_b0` | EfficientNet-B0 | ImageNet |
 | `vit_base_patch16_224` | ViT-B/16 | ImageNet |
-| `clip_vitb32` | CLIP ViT-B/32 | OpenAI |
+| `clip_vitb32` | CLIP ViT-B/32 | OpenAI (built with GELU, not the QuickGELU the weights were trained with) |
+| `clip_vitb32_qgelu` | CLIP ViT-B/32 | OpenAI, exact model (QuickGELU) |
+| `clip_ft` + `--checkpoint` | CLIP ViT-B/32 | OpenAI, image tower fine-tuned on ArtBench or WikiArt (see below) |
 | `clip_vitl14` | CLIP ViT-L/14 | OpenAI |
 | `clip_vitb32_laion` | CLIP ViT-B/32 | LAION-2B |
 | `dinov2_vitb14` | DINOv2 ViT-B/14 | Meta AI (LVD-142M) |
@@ -283,6 +285,169 @@ to `shared/` and `index.html`; the navigation entries of models that are not upl
 `<model dir>/featuremaps/<model>/meta.json` it finds, so a model's feature maps go online with the week of its model directory.
 `src/visualization/variants.py` (`model_dir`, `page_path`) defines the mapping.
 Re-running `scripts/08_build_explorer.py` / `rerender_explorer.py` / `relink_explorer.py` keeps this layout.
+
+---
+
+## Supervised ViT-B/16 (ImageNet vs. trained on the art labels)
+
+A plain Vision Transformer (timm `vit_base_patch16_224`, 224 px, 85.9M parameters) trained on the style / genre / artist labels of
+ArtBench-10 + WikiArt exactly like the supervised ResNet-50 (`scripts/10_train_cnn.py`): train splits of both datasets jointly,
+three linear heads on the encoder output, the same loss weights (style 1, genre 0.5, artist 0.5, label smoothing 0.1), RandomResizedCrop
+(0.35-1) + flip, AdamW + cosine schedule, bf16, 4 GPUs DDP, held-out evaluation on both test splits, wandb, `runs/<stamp>_<name>/`
+run directories (resumable). Differences forced by the architecture: 224 px instead of 256, mean = std = 0.5 normalisation (what the
+timm ViT weights expect), stochastic depth 0.1, a lower peak LR (AdamW, global batch 256: 2.5e-4 from scratch).
+
+| Model (`--model`) | Weights | File slug (`representations/<dataset>_<slug>_{train,test,all}.npz`) |
+|-------|---------|------|
+| `vit_imagenet` | timm `vit_base_patch16_224.augreg_in1k` (ImageNet-1k supervised only, no ImageNet-21k), frozen | `vit_imagenet` |
+| `vit_supervised` + `--checkpoint` | trained here **from scratch** (`--init scratch`; parallel to `cnn_supervised`) | `vit_supervised` |
+| `vit_supervised` + `--checkpoint` | **ImageNet init, fine-tuned** on the art labels (`--init imagenet`, peak LR 5e-5, layer-wise LR decay 0.75) | `vit_supervised_ft` |
+
+*Embedding* = the final-layer **CLS token** after the encoder's last LayerNorm (768-D, the input of the heads), for all three. `--vit-pool mean`
+gives the mean of the 196 patch tokens, `both` their concatenation (files get a `_mean` / `_both` suffix). Pre-processing: resize 224,
+centre crop, normalise with 0.5/0.5; vectors are not standardised.
+
+```bash
+# 4 GPUs (smoke test first; INIT=scratch|imagenet; self-resubmitting on a normal partition with CHAIN=1)
+INIT=scratch  SKIP_SMOKE=1 TIME_LIMIT_MIN=1410 CHAIN=1 sbatch --partition=dc-gpu --time=24:00:00 scripts/slurm/train_vit.sbatch
+INIT=imagenet SKIP_SMOKE=1 TIME_LIMIT_MIN=1410 CHAIN=1 sbatch --partition=dc-gpu --time=24:00:00 scripts/slurm/train_vit.sbatch
+RESUME=runs/<stamp>_vit_scratch sbatch scripts/slurm/train_vit.sbatch
+# embeddings (train + test + merged)
+python scripts/02_extract_features.py --model vit_imagenet --dataset artbench --split all
+python scripts/02_extract_features.py --model vit_supervised --checkpoint runs/<run>/vit_final.pt --dataset wikiart --split all
+```
+
+The ImageNet weights are read from the Hugging Face cache (fetch them once on a login node, compute nodes have no internet):
+`python -c "import timm; timm.create_model('vit_base_patch16_224.augreg_in1k', pretrained=True)"`.
+Test accuracies and run directories: `docs/vit_runs.md`.
+
+---
+
+## Autoregressive models (iGPT, VQ tokens + GPT)
+
+Two generative autoregressive families trained from scratch on ArtBench-10 + WikiArt (train splits jointly), shown as the model type "Autoregressive transformer" with a
+Weights menu (`docs/ar_runs.md`: sizes, losses, layer curves, samples, wandb links):
+
+| Model (`--model`) | What | Embedding | File slug |
+|---|---|---|---|
+| `ar_igpt` + `--checkpoint` | **iGPT**: 76.7M GPT on 32 x 32 px images, one pixel = one of 512 palette colours (`scripts/26_prepare_igpt.py`, `27_train_igpt.py`) | mean over the 1024 positions of the hidden states of ONE intermediate block (layer picked with a style probe, `24_probe_ar_layers.py`), 512-D | `ar_igpt` |
+| `ar_gpt` + `--checkpoint` | VQ tokenizer (128 px -> 16 x 16 tokens, 4096 codes; `21_train_vq.py`, `22_tokenize_ar.py`) + 160M GPT (`23_train_ar.py`, optional dataset / style prefix tokens) | same recipe on the tokens, 1024-D | `ar_gpt` |
+| `ar_vq` + `--checkpoint` | tokenizer only (baseline) | quantised latents pooled to 4 x 4, 512-D | `ar_vq` |
+
+The real image is tokenised with fixed preprocessing (no sampling) and fed through the transformer in eval mode with "no label" prefix tokens; `--ar-layer N` overrides the probed layer.
+
+```bash
+python scripts/20_prepare_ar_data.py && python scripts/26_prepare_igpt.py          # pixel cache (128 px) and iGPT palette / tokens, once, login node
+IGPT_EPOCHS=14 CHAIN=1 sbatch scripts/slurm/train_igpt.sbatch                      # iGPT, 4 GPUs (devel: 2 h segments, self-resubmitting)
+SKIP_SMOKE=1 CHAIN=1 NEXT_AR=1 sbatch --partition=dc-gpu --time=04:00:00 scripts/slurm/train_vq.sbatch   # VQ tokenizer, then tokenising + GPT training
+python scripts/24_probe_ar_layers.py --checkpoint runs/<run>/checkpoints/best.pt   # layer-by-layer style probe -> layer_probe.json
+IGPT_RUN=runs/<igpt run> AR_RUN=runs/<vq-gpt run> sbatch scripts/slurm/embed_ar.sbatch   # embeddings (train/test/all), explorer pages
+```
+
+---
+
+## CLIP gently fine-tuned on ArtBench / WikiArt (fit the data without forgetting)
+
+Two separate runs of the OpenAI CLIP ViT-B/32 (`ViT-B-32-quickgelu`, the exact model): one on ArtBench-10 train, one on WikiArt
+train (`scripts/28_train_clip_ft.py`; the test splits are only used for monitoring). Recipe, chosen to adapt the image tower to the art
+data while keeping CLIP's knowledge:
+
+* contrastive loss between the images and captions built from the labels ("a landscape painting by Vincent Van Gogh, in the post
+  impressionism style"; ArtBench has style + artist only, WikiArt genre + artist + style); captions shared by several images of a batch
+  are not negatives of each other (`--no-style-in-caption` leaves the style out, then it is only used for evaluation),
+* **text tower and logit scale frozen**: the caption embeddings are a fixed table in CLIP's original text space, the image tower is pulled
+  towards it (also means the text side costs nothing during training),
+* peak LR 1e-5 (not scaled), layer-wise LR decay 0.8, warm-up 200 steps, cosine, 5 epochs, global batch 512 (4 x 128), bf16,
+* **WiSE-FT**: `--clip-alpha a` interpolates the fine-tuned and the original image tower (`a * fine-tuned + (1 - a) * original`), e.g. 0.5.
+
+| Model (`--model`) | Weights | File slug (`representations/<dataset>_<slug>_{train,test,all}.npz`) |
+|-------|---------|------|
+| `clip_vitb32_qgelu` | OpenAI CLIP, frozen (exact model) | `clip_vitb32_qgelu` |
+| `clip_ft` + `--checkpoint runs/<run>/clip_ft_final.pt` | fine-tuned on ArtBench / WikiArt (`--clip-alpha 1`) | `clip_ft_artbench` / `clip_ft_wikiart` |
+| `clip_ft` + `--clip-alpha 0.5` | 50 % interpolation with the original | `clip_ft_<dataset>_wise50` |
+
+Embedding = L2-normalised CLIP image feature (512-D), same pre-processing as the frozen extractor. Every model is embedded on **both**
+datasets (cross-dataset: how much does the ArtBench-tuned model change the WikiArt space?).
+
+```bash
+# 4 GPUs (smoke test first; self-resubmitting on a normal partition with CHAIN=1)
+DATASET=artbench sbatch scripts/slurm/train_clip_ft.sbatch
+DATASET=wikiart  sbatch scripts/slurm/train_clip_ft.sbatch
+# embeddings (frozen + alpha 1.0 / 0.5 of both runs), docs/clip_ft_eval.md, explorer pages
+CLIP_FT_ARTBENCH=runs/<stamp>_clip_ft_artbench CLIP_FT_WIKIART=runs/<stamp>_clip_ft_wikiart sbatch scripts/slurm/embed_clip_ft.sbatch
+```
+
+Monitoring (`metrics.jsonl` / wandb; step 0 is the original CLIP): `val/caption_acc` (image -> its caption among all captions),
+`val/zs_style` (zero-shot style accuracy), `generic/cifar100`, `generic/cifar10` (zero-shot on CIFAR test sets in `data/generic`,
+the "did it forget?" probe; download once on a login node with torchvision). `scripts/29_eval_clip_ft.py` writes `docs/clip_ft_eval.md`:
+zero-shot style, CIFAR and kNN accuracy of the original and all fine-tuned models, with the test images that have a near-duplicate
+(CLIP cosine >= 0.95) in the other dataset's train split left out of the cross-dataset numbers.
+
+---
+
+## GAN (StyleGAN2) representations
+
+A StyleGAN2 trained from scratch on the **train splits of ArtBench-10 and WikiArt jointly** (123,143 paintings, unconditional, 128 px;
+`scripts/20_train_gan.py`, model in `src/models/gan.py`). Pure PyTorch, no custom CUDA ops (modulated convolutions in the non-fused form,
+the FIR resampling filters written with avg-pooling / bilinear interpolation), skip-architecture generator (23M parameters) and residual
+discriminator with minibatch-stddev (24M). Regularisation as in StyleGAN2-ADA: adaptive discriminator augmentation, lazy R1, path-length
+regularisation, G EMA. 4 GPUs (gradients all-reduced by hand because of the double back-prop), bf16 autocast, wandb,
+`runs/<stamp>_gan_union/` (config, `checkpoints/`, `samples/` grids of the EMA generator with fixed latents, `metrics.jsonl`, `gan_final.pt`),
+resumable and self-chaining like the other trainers. A FID-like number (torchvision Inception-v3 features, 5000 generated vs 5000 held-out
+real images, not comparable to published FIDs) is logged every 1000 kimg. Run, settings, stability and samples: `docs/gan_runs.md`.
+
+| Model (`--model`) | What is embedded | File slug (`representations/<dataset>_<slug>_{train,test,all}.npz`) |
+|-------|---------|------|
+| `gan_disc` + `--checkpoint runs/<run>/gan_final.pt` | **discriminator features**: the 512-D output of its last hidden layer (input of the real/fake logit), eval mode, no gradients | `gan_disc` |
+| `gan_enc` + `--checkpoint runs/<enc run>/gan_enc_final.pt` | **inversion encoder**: latent w (512-D) of a ResNet-34 trained to invert the frozen generator (`scripts/25_train_gan_encoder.py`; pixel L2 + VGG-16 perceptual loss on real paintings, latent supervision on generated ones) | `gan_enc` |
+
+Both use the same fixed pre-processing for every image (resize the shorter side to 128, centre crop, scale to [-1, 1]); in eval mode the
+discriminator's minibatch-stddev channel uses its training EMA, so a vector does not depend on the other images of its batch. Vectors are
+not normalised. The explorer shows one **GAN (StyleGAN2)** model type with a Weights menu (discriminator features / inversion encoder).
+
+```bash
+# 4 GPUs: smoke test + run in 2 h devel jobs that resubmit themselves (same run dir, same wandb run) until KIMG is reached
+KIMG=8000 CHAIN=1 NEXT_PARTITION=dc-gpu-devel NEXT_TIME=02:00:00 NEXT_TIME_LIMIT_MIN=108 TRAIN_ARGS="--amp bf16 --channels-last" \
+    sbatch scripts/slurm/train_gan.sbatch
+# the inversion encoder (needs the trained GAN)
+GAN_RUN=runs/<stamp>_gan_union sbatch scripts/slurm/train_gan_encoder.sbatch
+# embeddings (train + test + merged, both datasets) and the explorer pages
+GAN_RUN=runs/<stamp>_gan_union ENC_RUN=runs/<stamp>_gan_enc sbatch scripts/slurm/embed_gan.sbatch
+```
+
+The FID metric needs the torchvision Inception-v3 weights (the encoder the VGG-16 weights) in the torch hub cache: fetch them once on a
+login node (`torchvision.models.inception_v3(weights="IMAGENET1K_V1")`, `vgg16(weights="IMAGENET1K_V1")`); compute nodes have no internet.
+
+---
+
+## DINO v1 trained on ArtBench / WikiArt
+
+DINO v1 (Caron et al. 2021, self-distillation without labels) ViT-B/16, trained here on the train split of ONE dataset at a time
+(`scripts/29_train_dino.py`, model in `src/models/dino.py`): student + EMA teacher (momentum cosine 0.996 -> 1), multi-crop (2 global
+224 px crops scale 0.4-1, 6 local 96 px crops scale 0.05-0.4), colour jitter / grayscale / blur / solarisation, centring + sharpening
+(teacher temperature 0.04 -> 0.07, student 0.1), 3-layer MLP head with weight-normalised last layer, AdamW with linearly scaled LR
+(warm-up + cosine), weight decay 0.04 -> 0.4, stochastic depth 0.1, per-parameter gradient clipping, bf16, 4 A100 (DDP, global batch 256,
+~950 img/s). Data loading reads uint8 256 px caches (`scripts/29_cache_images.py`, `data/cache256/`, git-ignored).
+
+| Weights (`representations/<dataset>_<slug>_{train,test,all}.npz`) | Init | Epochs | peak LR (batch 256) | prototypes | kNN / linear (teacher, style, 10k -> 4k) |
+|------|------|-----|------|-----|------|
+| `dino_adapt_artbench` | ImageNet-1k DINO (backbone + heads) | 50 | 1e-4 | 65536 | 0.585 / 0.552 (before: 0.542 / 0.556) |
+| `dino_adapt_wikiart` | ImageNet-1k DINO | 50 | 1e-4 | 65536 | 0.561 / 0.460 (before: 0.518 / 0.468) |
+| `dino_scratch_artbench` | random | 200 | 5e-4 | 16384 | 0.528 / 0.540 |
+| `dino_scratch_wikiart` | random | 200 | 5e-4 | 16384 | 0.517 / 0.436 |
+
+The adapted runs start from Meta's full checkpoint (`pretrained/dino_vitb16_full/`, download URL in `src/models/dino.py`). Embedding = CLS
+token of the **teacher** backbone (768-D, L2-normalised), Resize 256 + CenterCrop 224, ImageNet mean/std, as for the pretrained `dino_vitb16`.
+All four models are embedded on both datasets (cross-dataset). Collapse monitors (teacher entropy, KL of the mean teacher output to
+uniform, feature spread) and kNN / linear probes every 5 epochs are logged to wandb / `runs/<run>/metrics.jsonl`.
+
+```bash
+python scripts/29_cache_images.py                                   # once, login node
+DATASET=artbench INIT=scratch  TRAIN_ARGS="--epochs 200" TIME_LIMIT_MIN=465 CHAIN=1 NEXT_TIME=08:00:00 \
+    sbatch --partition=dc-gpu --time=08:00:00 scripts/slurm/train_dino.sbatch      # INIT=imagenet --epochs 50 for the adapted runs
+DINO_RUNS="runs/<adapt_ab> runs/<adapt_wa> runs/<scratch_ab> runs/<scratch_wa>" sbatch scripts/slurm/dino_embeddings.sbatch
+python scripts/02_extract_features.py --model dino_train --checkpoint runs/<run>/dino_final.pt --dataset artbench --split all
+```
 
 ---
 

@@ -31,6 +31,7 @@ from .base_extractor import BaseExtractor
 # ── Recommended model / pretrained pairs ──────────────────────────────────────
 CLIP_PRESETS: dict[str, tuple[str, str]] = {
     "clip_vitb32":     ("ViT-B-32",  "openai"),
+    "clip_vitb32_qgelu": ("ViT-B-32-quickgelu", "openai"),   # the exact OpenAI model (clip_vitb32 builds GELU, not QuickGELU)
     "clip_vitl14":     ("ViT-L-14",  "openai"),
     "clip_vitb32_laion": ("ViT-B-32", "laion2b_s34b_b79k"),
     "clip_vitl14_laion": ("ViT-L-14", "laion2b_s32b_b82k"),

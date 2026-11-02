@@ -7,6 +7,7 @@ For a curated set of held-out (test split) paintings it records the internal fea
   * the ImageNet ResNet-50                         (stem, layer1-4)
   * the convolutional autoencoder                  (5 encoder stages, latent code, reconstruction)
   * the masked autoencoders (ImageNet MAE ViT-B/16 and the ones trained here; encoder on the unmasked image, 14x14 grid)
+  * the supervised ViT-B/16s (ImageNet, trained here from scratch / fine-tuned from ImageNet; 14x14 grid)
   * DINOv2 ViT-B/14 and CLIP ViT-B/32 (image tower) (patch tokens of every second transformer block, reshaped to a
                                                     grid, plus the CLS-token attention map of that block)
 and stores per image and layer
@@ -150,6 +151,38 @@ def build_mae_models(device, names: list[str]) -> dict:
     return models
 
 
+VIT_MODELS = ["vit_imagenet", "vit_supervised", "vit_supervised_ft"]
+VIT_TITLES = {"vit_imagenet": "ViT-B/16 (ImageNet, frozen)", "vit_supervised": "ViT-B/16 (trained here, from scratch)",
+              "vit_supervised_ft": "ViT-B/16 (ImageNet, fine-tuned on art labels)"}
+
+
+def build_vit_models(device, names: list[str]) -> dict:
+    """Supervised ViT-B/16s (scripts/19_train_vit.py): block outputs and CLS attention, handled like DINOv2 / the MAEs."""
+    from src.models.supervised_vit import IMAGENET_TAG, VIT_MEAN, VIT_STD, MultiHeadViT, create_backbone
+    models = {}
+    for name in names:
+        if name == "vit_imagenet":
+            vit = create_backbone(pretrained=True, tag=IMAGENET_TAG)
+        else:
+            run = "vit_scratch" if name == "vit_supervised" else "vit_imagenet_ft"
+            cks = sorted((REPO_ROOT / "runs").glob(f"*_{run}/vit_final.pt"))
+            if not cks:
+                print(f"  {name}: no finished run found, skipped")
+                continue
+            ck = torch.load(cks[-1], map_location="cpu", weights_only=False)
+            vit = MultiHeadViT(ck["head_sizes"], ck["arch"]).backbone
+            vit.load_state_dict(ck["backbone"])
+        vit = vit.to(device).eval()
+        blocks = (2, 4, 6, 8, 10, 12)
+        # embeddings use Resize 224 + CenterCrop 224 and mean = std = 0.5; here the central 224 of the 256 px square
+        models[name] = dict(net=vit, kind="vit", vit="dino", norm="half", crop=224, frame=[16 / 256, 16 / 256, 240 / 256, 240 / 256],
+                            mean=torch.tensor(VIT_MEAN).view(1, 3, 1, 1), std=torch.tensor(VIT_STD).view(1, 3, 1, 1),
+                            title=VIT_TITLES[name] + " (patch tokens, 14x14 grid)",
+                            layers={f"block{b}": vit.blocks[b - 1] for b in blocks},
+                            attn={f"block{b}": vit.blocks[b - 1].attn.qkv for b in range(1, 13)}, heads=vit.blocks[0].attn.num_heads)
+    return models
+
+
 def build_models(device, ae_ckpt: Path, cnn_ckpt: Path, wanted: list[str] | None = None):
     import timm
     models = {}
@@ -189,6 +222,7 @@ def build_models(device, ae_ckpt: Path, cnn_ckpt: Path, wanted: list[str] | None
                           layers={f"block{b}": res[b - 1] for b in blocks}, attn={f"block{b}": res[b - 1].attn for b in range(1, 13)},
                           heads=res[0].attn.num_heads)
     models.update(build_mae_models(device, [m for m in MAE_MODELS if wanted is None or m in wanted]))
+    models.update(build_vit_models(device, [m for m in VIT_MODELS if wanted is None or m in wanted]))
     return models
 
 
@@ -328,7 +362,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--batch-size", type=int, default=8)
     ap.add_argument("--models", nargs="+", default=["cnn_supervised", "resnet50_imagenet", "autoencoder", "dinov2", "clip"],
-                    choices=["cnn_supervised", "resnet50_imagenet", "autoencoder", "dinov2", "clip"] + MAE_MODELS,
+                    choices=["cnn_supervised", "resnet50_imagenet", "autoencoder", "dinov2", "clip"] + MAE_MODELS + VIT_MODELS,
                     help="models to (re)compute; the others keep their existing data")
     args = ap.parse_args()
 
@@ -366,7 +400,8 @@ def main() -> None:
         with torch.no_grad():
             for m, v in models.items():
                 if v["kind"] == "vit" and v["vit"] == "dino":       # same input as the embeddings: Resize(256) + CenterCrop(224)
-                    x = ((x01 - IMAGENET_MEAN.to(device)) / IMAGENET_STD.to(device))[:, :, 16:240, 16:240]
+                    mean, std = v.get("mean", IMAGENET_MEAN).to(device), v.get("std", IMAGENET_STD).to(device)
+                    x = ((x01 - mean) / std)[:, :, 16:240, 16:240]
                 elif v["kind"] == "vit":                             # CLIP: the whole square resized to 224 (its preprocessing)
                     x224 = F.interpolate(x01, size=224, mode="bicubic", antialias=True, align_corners=False).clamp(0, 1)
                     x = (x224 - CLIP_MEAN.to(device)) / CLIP_STD.to(device)
@@ -422,7 +457,7 @@ def main() -> None:
         (model_root(out, m) / "meta.json").write_text(json.dumps(meta))
     idx_file = out / "index.json"
     old = json.loads(idx_file.read_text()) if idx_file.exists() else {"models": {}}
-    order = ["cnn_supervised", "resnet50_imagenet", "autoencoder", *MAE_MODELS, "dinov2", "clip"]
+    order = ["cnn_supervised", "resnet50_imagenet", "autoencoder", *MAE_MODELS, *VIT_MODELS, "dinov2", "clip"]
     merged = {**old.get("models", {}), **{m: {"dir": model_dir(f"artbench_{m}_all")} for m in meta_models}}
     from src.metadata.nudity import load_flags
     fl = load_flags([b["path"] for b in images])        # nudity flags (None if scripts/15_flag_nudity.py was not run)

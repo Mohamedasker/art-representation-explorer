@@ -52,8 +52,25 @@ FAMILIES = [
     ("simclr", "SimCLR ResNet-50", [("simclr_imagenet", "ImageNet (frozen)"),
                                     ("simclr_artbench", "trained on ArtBench"),
                                     ("simclr_wikiart", "trained on WikiArt")]),
-    ("dinov2", "DINOv2 ViT-B/14", [("dinov2", "Meta (LVD-142M)")]),
-    ("clip", "CLIP ViT-B/32", [("clip", "OpenAI")]),
+    ("vit", "ViT-B/16 (supervised)", [("vit_imagenet", "ImageNet (frozen)"),
+                                      ("vit_supervised", "trained here (from scratch)"),
+                                      ("vit_supervised_ft", "ImageNet, fine-tuned on art labels")]),
+    ("ar", "Autoregressive transformer", [("ar_igpt", "iGPT (pixels, probed layer)"),
+                                          ("ar_gpt", "VQ tokens + GPT (probed layer)"),
+                                          ("ar_vq", "VQ tokenizer latents (baseline)")]),
+    ("gan", "GAN (StyleGAN2)", [("gan_disc", "discriminator features"), ("gan_enc", "inversion encoder (latent w)")]),
+    ("dino", "DINO / DINOv2 (ViT-B)", [("dinov2", "DINOv2 ViT-B/14 (LVD-142M)"),
+                                       ("dino_vitb16", "DINO v1 ViT-B/16 (ImageNet-1k)"),
+                                       ("dino_adapt_artbench", "DINO v1, ImageNet, adapted on ArtBench"),
+                                       ("dino_adapt_wikiart", "DINO v1, ImageNet, adapted on WikiArt"),
+                                       ("dino_scratch_artbench", "DINO v1, from scratch on ArtBench"),
+                                       ("dino_scratch_wikiart", "DINO v1, from scratch on WikiArt")]),
+    ("clip", "CLIP ViT-B/32", [("clip", "OpenAI (frozen, GELU variant)"),
+                               ("clip_vitb32_qgelu", "OpenAI (frozen, exact model)"),
+                               ("clip_ft_artbench", "fine-tuned on ArtBench"),
+                               ("clip_ft_artbench_wise50", "fine-tuned on ArtBench, 50 % interpolated with OpenAI"),
+                               ("clip_ft_wikiart", "fine-tuned on WikiArt"),
+                               ("clip_ft_wikiart_wise50", "fine-tuned on WikiArt, 50 % interpolated with OpenAI")]),
 ]
 _STEM = re.compile(r"^(artbench|wikiart)_(.+)_(all|train|test)$")
 
@@ -69,11 +86,12 @@ def member_of(stem: str) -> tuple[str, str] | None:
     if not m:
         return None
     model = m.group(2)
+    best = None
     for fam, _title, members in FAMILIES:
         for key, _label in members:
-            if model == key or model.startswith(key + "_"):
-                return fam, key
-    return None
+            if (model == key or model.startswith(key + "_")) and (best is None or len(key) > len(best[1])):
+                best = (fam, key)                # longest key wins (vit_supervised_ft before vit_supervised)
+    return best
 
 
 # ── where the pages live ──────────────────────────────────────────────────────

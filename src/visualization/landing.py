@@ -52,10 +52,54 @@ MODEL_INFO = [
     ("mae_scratch_wikiart", "MAE · from scratch on WikiArt", "Masked autoencoder, in-domain",
      "Randomly initialised MAE ViT-B/16 trained with the masked-patch objective on WikiArt train only."),
     *_simclr_info(),
+    ("vit_imagenet", "ViT-B/16 (ImageNet)", "Supervised, off-the-shelf",
+     "Standard ImageNet-1k classification ViT-B/16 (timm augreg_in1k), frozen; never trained on art. Final-layer CLS token, 768-D."),
+    ("vit_supervised_ft", "ViT-B/16 (ImageNet, fine-tuned on art)", "Supervised, in-domain",
+     "ImageNet ViT-B/16 fine-tuned to predict style, genre and artist of ArtBench + WikiArt (multi-task). "
+     "Final-layer CLS token, 768-D."),
+    ("vit_supervised", "ViT-B/16 (trained here)", "Supervised, in-domain",
+     "ViT-B/16 trained from scratch on ArtBench + WikiArt to predict style, genre and artist (multi-task), "
+     "like the ResNet-50. Final-layer CLS token, 768-D."),
+    ("ar_igpt", "Autoregressive transformer (iGPT, pixels)", "Generative, autoregressive",
+     "iGPT-style: a 24-layer GPT trained from scratch on ArtBench + WikiArt to predict the next pixel of 32x32 paintings "
+     "(each pixel = one of 512 palette colours, raster order). Mean over the 1024 pixel positions of the hidden states of "
+     "one middle layer (chosen with a style probe), 512-D."),
+    ("ar_gpt", "Autoregressive transformer (VQ tokens + GPT)", "Generative, autoregressive",
+     "VQ tokenizer (128 px -> 16x16 tokens) + GPT-style transformer trained from scratch on ArtBench + WikiArt with "
+     "next-token prediction. Mean over the token positions of the hidden states of one intermediate block (layer picked "
+     "with a style probe), 1024-D."),
+    ("ar_vq", "Autoregressive model (VQ tokenizer latents)", "Generative, autoregressive (tokenizer only)",
+     "Baseline without the transformer: the quantised latents of the VQ tokenizer, average-pooled to a 4x4 grid, 512-D."),
+    ("dino_vitb16", "DINO v1 ViT-B/16 (ImageNet-1k)", "Self-supervised",
+     "The original DINO (self-distillation, no labels) trained on ImageNet-1k only; CLS token, 768-D. "
+     "The ImageNet-1k counterpart of DINOv2, which was trained on the larger LVD-142M collection."),
+    ("dino_adapt_artbench", "DINO v1 · adapted on ArtBench", "Self-supervised, in-domain",
+     "DINO v1 ViT-B/16 initialised from the ImageNet-1k weights and trained further with the DINO objective (50 epochs, low learning rate) on ArtBench-10 train only. Teacher CLS token, 768-D."),
+    ("dino_adapt_wikiart", "DINO v1 · adapted on WikiArt", "Self-supervised, in-domain",
+     "DINO v1 ViT-B/16 initialised from the ImageNet-1k weights and trained further with the DINO objective (50 epochs, low learning rate) on WikiArt train only. Teacher CLS token, 768-D."),
+    ("dino_scratch_artbench", "DINO v1 · from scratch on ArtBench", "Self-supervised, in-domain",
+     "DINO v1 ViT-B/16 trained from random initialisation with the DINO objective (200 epochs) on ArtBench-10 train only. Teacher CLS token, 768-D."),
+    ("dino_scratch_wikiart", "DINO v1 · from scratch on WikiArt", "Self-supervised, in-domain",
+     "DINO v1 ViT-B/16 trained from random initialisation with the DINO objective (200 epochs) on WikiArt train only. Teacher CLS token, 768-D."),
+    ("gan_disc", "GAN (StyleGAN2): discriminator features", "Generative, adversarial",
+     "StyleGAN2 (128 px, adaptive augmentation) trained from scratch on ArtBench + WikiArt train. Penultimate "
+     "features of the discriminator (the 512-D layer before the real/fake logit) on every real painting."),
+    ("gan_enc", "GAN (StyleGAN2): inversion encoder", "Generative, adversarial (inverted generator)",
+     "A ResNet-34 encoder trained to invert the frozen StyleGAN2 generator (image -> latent w, reconstruction + "
+     "perceptual loss). The 512-D latent w of every painting."),
     ("dinov2", "DINOv2 ViT-B/14", "Self-supervised",
      "Pretrained with self-distillation on large image collections; no labels and no text."),
     ("clip", "CLIP ViT-B/32", "Language-supervised",
      "Pretrained to match images with captions; embeddings carry a lot of semantic content."),
+    ("clip_vitb32_qgelu", "CLIP ViT-B/32 (exact OpenAI model)", "Language-supervised",
+     "The OpenAI CLIP with its QuickGELU activation (the plain CLIP entry builds GELU, which shifts the features slightly); "
+     "the starting point of the fine-tuned CLIPs."),
+    *[(f"clip_ft_{ds}{suffix}", f"CLIP ViT-B/32 · fine-tuned on {name}{note}", "Language-supervised, in-domain",
+       f"OpenAI CLIP, image tower fine-tuned gently (low LR, few epochs, text tower frozen) with a contrastive loss "
+       f"between {name} train images and captions built from their labels{expl}. L2-normalised image feature, 512-D.")
+      for ds, name in (("artbench", "ArtBench"), ("wikiart", "WikiArt"))
+      for suffix, note, expl in (("", "", ""),
+                                 ("_wise50", " (50 % blend)", "; weights averaged 50/50 with the original image tower"))],
 ]
 DATASETS = {"artbench_train": ("ArtBench-10 · train", "50,000 paintings · 10 styles"),
             "artbench_test": ("ArtBench-10 · test", "10,000 held-out paintings"),
