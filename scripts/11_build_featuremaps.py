@@ -21,6 +21,13 @@ and stores per image and layer
 
     python scripts/11_build_featuremaps.py                 # 10 images per ArtBench style, 4 per WikiArt style
     python scripts/11_build_featuremaps.py --per-style-artbench 20 --per-style-wikiart 8
+
+Layout (so that the models can be published one at a time, together with the pages of their model type):
+    featuremaps/index.html, index.json, inputs/<id>.jpg      viewer, painting list, the paintings (shared, upload once)
+    <model dir>/featuremaps/<model>/meta.json                layers of the model
+    <model dir>/featuremaps/<model>/<id>/stats.json, <model>__<layer>__*.{jpg,png}, recon.jpg (autoencoder)
+<model dir> is the explorer directory of the model type (src.visualization.variants.model_dir), e.g. mae/ for mae_scratch_*.
+The viewer offers the models whose meta.json it finds.
 """
 
 from __future__ import annotations
@@ -41,10 +48,16 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from src.models.autoencoder import Autoencoder, AutoencoderConfig
 from src.models.supervised_cnn import MultiHeadCNN
+from src.visualization.variants import model_dir
 
 IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
 IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 TILE, GRID = 64, 8            # sprite: GRID x GRID tiles of TILE px  (-> 512 x 512)
+
+
+def model_root(out: Path, model: str) -> Path:
+    """Folder with the feature maps of one model: next to the explorer pages of its model type."""
+    return out.parent / model_dir(f"artbench_{model}_all") / "featuremaps" / model
 
 
 def load_image(path: str, size: int = 256) -> Image.Image:
@@ -321,8 +334,7 @@ def main() -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     out = REPO_ROOT / args.out_dir
-    data = out / "data"
-    data.mkdir(parents=True, exist_ok=True)
+    (out / "inputs").mkdir(parents=True, exist_ok=True)
     images = pick_images({"artbench": args.per_style_artbench, "wikiart": args.per_style_wikiart}, args.seed)
     print(f"{len(images)} images, device {device}, models {args.models}")
     models = {m: v for m, v in build_models(device, REPO_ROOT / args.ae_ckpt, REPO_ROOT / args.cnn_ckpt, args.models).items()
@@ -347,10 +359,10 @@ def main() -> None:
         B = len(batch)
         rolls: dict[str, dict] = {}
         for b, im in zip(batch, ims):
-            (data / b["id"]).mkdir(exist_ok=True)
-            im.save(data / b["id"] / "input.jpg", quality=90)
-            sf = data / b["id"] / "stats.json"
-            b["stats"] = json.loads(sf.read_text()) if sf.exists() else {}          # keep other models' statistics
+            im.save(out / "inputs" / f"{b['id']}.jpg", quality=90)
+            for m in models:
+                (model_root(out, m) / b["id"]).mkdir(parents=True, exist_ok=True)
+            b["stats"] = {m: {} for m in models}
         with torch.no_grad():
             for m, v in models.items():
                 if v["kind"] == "vit" and v["vit"] == "dino":       # same input as the embeddings: Resize(256) + CenterCrop(224)
@@ -369,7 +381,7 @@ def main() -> None:
                 if v["kind"] == "vit":                       # attention rollout up to every tapped block
                     rolls[m] = attn_taps[m].rollout(list(v["layers"]))
                 for j, b in enumerate(batch):
-                    d = data / b["id"]
+                    d = model_root(out, m) / b["id"]
                     if recon is not None:
                         r = ((recon[j].float().clamp(-1, 1) + 1) / 2 * 255).byte().permute(1, 2, 0).cpu().numpy()
                         Image.fromarray(r).save(d / "recon.jpg", quality=90)
@@ -400,15 +412,18 @@ def main() -> None:
                                 sheet[r_ * 64:(r_ + 1) * 64, c_ * 64:(c_ + 1) * 64] = small(hm[h])
                             save_gray((sheet * 255).byte().cpu().numpy(), d / f"{m}__{lk}__heads.png")
                             st.update(has_attn=True, has_roll=True, heads=int(nh), head_cols=cols)
-                        b["stats"][f"{m}/{lk}"] = st
+                        b["stats"][m][f"{m}/{lk}"] = st
         for b in batch:
-            (data / b["id"] / "stats.json").write_text(json.dumps(b.pop("stats")))
+            for m, st in b.pop("stats").items():
+                (model_root(out, m) / b["id"] / "stats.json").write_text(json.dumps(st))
         print(f"  {min(s + args.batch_size, len(images))} / {len(images)}", flush=True)
 
-    idx_file = data / "index.json"
+    for m, meta in meta_models.items():
+        (model_root(out, m) / "meta.json").write_text(json.dumps(meta))
+    idx_file = out / "index.json"
     old = json.loads(idx_file.read_text()) if idx_file.exists() else {"models": {}}
     order = ["cnn_supervised", "resnet50_imagenet", "autoencoder", *MAE_MODELS, "dinov2", "clip"]
-    merged = {**old.get("models", {}), **meta_models}
+    merged = {**old.get("models", {}), **{m: {"dir": model_dir(f"artbench_{m}_all")} for m in meta_models}}
     from src.metadata.nudity import load_flags
     fl = load_flags([b["path"] for b in images])        # nudity flags (None if scripts/15_flag_nudity.py was not run)
     index = {"images": [{**{k: b[k] for k in ("id", "dataset", "style", "file")}, **({"nsfw": int(fl[j])} if fl is not None else {})}

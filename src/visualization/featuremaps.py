@@ -108,7 +108,10 @@ main { overflow:auto; min-width:0; padding-right:4px; }
 <div id="tip"></div>
 <script>
 const $ = id => document.getElementById(id);
-const DATA = "data/";
+// shared: index.json (paintings, model list) and inputs/<id>.jpg next to this page; per model, in the folder of its model
+// type: ../<dir>/featuremaps/<model>/{meta.json, <id>/...}.  Only the models whose folder is present are offered.
+const INPUTS = "inputs/";
+const mdir = m => `../${META.models[m].dir}/featuremaps/${m}/`;
 const CMAPS = {
   gray: [[0,0,0],[255,255,255]],
   viridis: [[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]],
@@ -144,7 +147,7 @@ function save() { try { location.hash = `${cur.id}|${cur.model}|${cur.layer}`; }
 
 function renderThumbs() {
   $("thumbs").innerHTML = visible().map(im =>
-    `<img src="${DATA}${im.id}/input.jpg" data-id="${im.id}" title="${im.style}" loading="lazy" class="${im.id === cur.id ? "sel" : ""}">`).join("");
+    `<img src="${INPUTS}${im.id}.jpg" data-id="${im.id}" title="${im.style}" loading="lazy" class="${im.id === cur.id ? "sel" : ""}">`).join("");
 }
 function renderTabs() {
   $("modeltabs").innerHTML = Object.entries(META.models).map(([k, m]) => `<button data-m="${k}" class="${k === cur.model ? "on" : ""}">${m.title}</button>`).join("");
@@ -156,17 +159,18 @@ function loadImg(src) { return new Promise(res => { const i = new Image(); i.onl
 
 async function show() {
   if (!cur.id) return;
-  const im = META.images.find(x => x.id === cur.id), base = `${DATA}${cur.id}/`, tag = `${cur.model}__${cur.layer}`;
+  const ls = META.models[cur.model].layers; if (!ls.some(l => l.key === cur.layer)) cur.layer = ls[ls.length - 1].key;   // e.g. the default model is not uploaded
+  const im = META.images.find(x => x.id === cur.id), base = `${mdir(cur.model)}${cur.id}/`, tag = `${cur.model}__${cur.layer}`;
   $("imgtitle").textContent = `· ${im.style} · ${im.file}`;
   $("reconcard").hidden = META.models[cur.model].kind !== "ae";
   if (META.models[cur.model].kind === "ae") $("reconimg").src = base + "recon.jpg";
   $("pcaimg").src = `${base}${tag}__pca.jpg`;
-  if (!stats || stats.id !== cur.id) { try { stats = { id: cur.id, d: await (await fetch(base + "stats.json", { cache: "no-store" })).json() }; } catch (e) { stats = null; } }
+  if (!stats || stats.id !== cur.id || stats.model !== cur.model) { try { stats = { id: cur.id, model: cur.model, d: await (await fetch(base + "stats.json", { cache: "no-store" })).json() }; } catch (e) { stats = null; } }
   const st0 = stats && stats.d[`${cur.model}/${cur.layer}`], hasAttn = !!(st0 && st0.has_attn);
   const opt = (flag, name) => flag ? loadImg(`${base}${tag}__${name}`) : Promise.resolve(null);
   [spriteImg, meanImg, pcsImg, attnImg, rollImg, headsImg, inputImg] = await Promise.all([
     loadImg(`${base}${tag}__sprite.jpg`), loadImg(`${base}${tag}__mean.png`), loadImg(`${base}${tag}__pcs.jpg`),
-    opt(hasAttn, "attn.png"), opt(st0 && st0.has_roll, "roll.png"), opt(st0 && st0.heads, "heads.png"), loadImg(base + "input.jpg")]);
+    opt(hasAttn, "attn.png"), opt(st0 && st0.has_roll, "roll.png"), opt(st0 && st0.heads, "heads.png"), loadImg(`${INPUTS}${cur.id}.jpg`)]);
   const prev = $("ovsrc").value;
   $("ovsrc").innerHTML = `<option value="mean">mean activation</option>` + (hasAttn ? `<option value="attn">CLS attention (mean of heads)</option>` : "") +
     (rollImg ? `<option value="roll">attention rollout (flow from the input)</option>` : "");
@@ -281,7 +285,7 @@ function setDataset(ds) {
 $("dsbtns").addEventListener("click", e => { const b = e.target.closest("button[data-ds]"); if (b) setDataset(b.dataset.ds); });
 $("stylesel").addEventListener("change", () => { cur.style = $("stylesel").value; renderThumbs(); const v = visible(); if (v.length && !v.find(i => i.id === cur.id)) { cur.id = v[0].id; stats = null; show(); } });
 $("thumbs").addEventListener("click", e => { const i = e.target.closest("img[data-id]"); if (i) { cur.id = i.dataset.id; stats = null; show(); } });
-$("modeltabs").addEventListener("click", e => { const b = e.target.closest("button[data-m]"); if (b) { cur.model = b.dataset.m; renderTabs(); show(); } });
+$("modeltabs").addEventListener("click", e => { const b = e.target.closest("button[data-m]"); if (b) { cur.model = b.dataset.m; stats = null; renderTabs(); show(); } });
 $("layertabs").addEventListener("click", e => { const b = e.target.closest("button[data-l]"); if (b) { cur.layer = b.dataset.l; show(); } });
 for (const id of ["cmap", "grid"]) $(id).addEventListener("change", () => { drawSprite(); drawOverlay(); drawHeads(); });
 $("spmode").addEventListener("change", () => { drawSprite(); renderStats(); });
@@ -297,10 +301,16 @@ window.addEventListener("keydown", e => {
   e.preventDefault();
 });
 
-fetch(DATA + "index.json", { cache: "no-store" }).then(r => r.json()).then(m => {
+fetch("index.json", { cache: "no-store" }).then(r => r.json()).then(async m => {
   META = m;
+  const found = await Promise.all(Object.entries(m.models).map(async ([k, v]) => {
+    try { const r = await fetch(`../${v.dir}/featuremaps/${k}/meta.json`, { cache: "no-store" }); return r.ok ? [k, { ...v, ...(await r.json()) }] : null; } catch (e) { return null; }
+  }));
+  m.models = Object.fromEntries(found.filter(Boolean));
+  if (!Object.keys(m.models).length) { $("sub").textContent = "no feature-map data uploaded yet"; return; }
+  if (!m.models[cur.model]) cur.model = Object.keys(m.models)[0];
   $("sub").textContent = `${m.images.length} held-out paintings · ${Object.keys(m.models).length} models`;
-  $("note").textContent = (m.note || "") + ". Sprites show the most varied channels of each layer; their grey values are normalised per channel. For the transformers the channels are the 768 embedding dimensions of the patch tokens laid out on their patch grid (16x16 for DINOv2, 14x14 for the MAEs, 7x7 for CLIP). Each model is shown exactly the part of the painting it sees: DINOv2 and the MAEs the central 224 of 256 px, the others the whole square.";
+  $("note").textContent = (m.note || "") + ". Sprites show the most varied channels of each layer; their grey values are normalised per channel. For the transformers the channels are the 768 embedding dimensions of the patch tokens laid out on their patch grid (16x16 for DINOv2, 14x14 for the MAEs and ViT-B/16s, 7x7 for CLIP). Each model is shown exactly the part of the painting it sees: DINOv2, the MAEs and ViT-B/16s the central 224 of 256 px, the others the whole square.";
   const h = (location.hash || "").slice(1).split("|"), im = h[0] && m.images.find(i => i.id === h[0]);
   if (im && !isHidden(im)) { cur.id = im.id; cur.ds = im.dataset; if (m.models[h[1]]) cur.model = h[1]; if (h[2]) cur.layer = h[2]; }
   if (m.images.some(i => i.nsfw === 1)) {
@@ -313,7 +323,9 @@ fetch(DATA + "index.json", { cache: "no-store" }).then(r => r.json()).then(m => 
     $("explcount").textContent = `(${m.images.filter(i => i.nsfw === 1).length} of ${m.images.length} flagged${showExplicit ? "" : ", hidden"})`;
   }
   setDataset(cur.ds);
-}).catch(() => { $("sub").textContent = "no data yet: run scripts/11_build_featuremaps.py"; });
+}).catch(() => { $("sub").textContent = location.protocol === "file:"
+  ? "this page must be served over http (browsers block local files): run  python serve.py  in the explorer folder and open http://127.0.0.1:8877/featuremaps/"
+  : "no data yet: run scripts/11_build_featuremaps.py"; });
 </script></body></html>
 """
 

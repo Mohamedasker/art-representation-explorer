@@ -102,8 +102,8 @@ def refresh_landing_json(src: Path, page_stem: str, attrs: list) -> None:
 
 
 def refresh_featuremaps(src: Path, dst: Path) -> None:
-    """Nudity flags for the feature-map viewer's curated test paintings (featuremaps/data/index.json) + current viewer page."""
-    f = src / "featuremaps" / "data" / "index.json"
+    """Nudity flags for the feature-map viewer's curated test paintings (featuremaps/index.json) + current viewer page."""
+    f = src / "featuremaps" / "index.json"
     if not f.exists():
         return
     from src.visualization.featuremaps import write_viewer

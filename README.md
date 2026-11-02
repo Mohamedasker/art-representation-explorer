@@ -271,14 +271,17 @@ index.html, models.html        overview (entry point), all models / all weights
 shared/thumbs/, shared/meta/   per-image files used by every model page - upload once, with the first week
 <model>/                       one directory per model type: resnet50, autoencoder, mae, simclr, clip, dino (DINO v1 + DINOv2), vit, gan, ar
     artbench_<weights>_all.html, wikiart_<weights>_all.html, ... (all its weights, both datasets, every sample / split view)
+    featuremaps/<model>/       feature maps of that model's layers: meta.json + <painting id>/{stats.json, <model>__<layer>__*.jpg|png}
 lecture1/index.html            lecture 1: toy fish data
-featuremaps/                   feature-map viewer (own data)
+featuremaps/                   feature-map viewer: index.html, index.json (paintings, model -> directory), inputs/<id>.jpg - upload once
 cache/                         build intermediates for scripts/08_build_explorer.py - not needed to view the pages, do not upload
 ```
 
 A model page links to `../shared/` and to other pages with relative paths, so any subset of model folders can be uploaded next
 to `shared/` and `index.html`; the navigation entries of models that are not uploaded yet just lead nowhere until their week
-(the overview's cards likewise). `src/visualization/variants.py` (`model_dir`, `page_path`) defines the mapping.
+(the overview's cards likewise). The feature-map viewer (`featuremaps/index.html`) offers exactly the models whose
+`<model dir>/featuremaps/<model>/meta.json` it finds, so a model's feature maps go online with the week of its model directory.
+`src/visualization/variants.py` (`model_dir`, `page_path`) defines the mapping.
 Re-running `scripts/08_build_explorer.py` / `rerender_explorer.py` / `relink_explorer.py` keeps this layout.
 
 ---
@@ -307,7 +310,7 @@ python scripts/rerender_explorer.py                    # put the flags into the 
 `scripts/08_build_explorer.py` reads `data/nudity/flags.npz` for every new page (`src/metadata/nudity.py`), so pages of new models
 need no extra step as long as the flags exist. `data/` is not versioned: regenerate the flags with the commands above.
 **The hiding is done in the page only**: the flagged thumbnail files are still in `visualizations/explorer/shared/thumbs/` (and in
-`featuremaps/data/`), so do not publish those folders as they are if the audience must not be able to reach them.
+`featuremaps/inputs/`), so do not publish those folders as they are if the audience must not be able to reach them.
 
 ---
 
@@ -415,9 +418,11 @@ The two-digit prefixes order the pipeline but are **not unique**: the branch `ex
 | Script | What it does |
 |---|---|
 | `08_build_explorer.py` | the main build: projections (UMAP, t-SNE, PCA), k-means, colour maps and the pages of one representation, shared thumbnails / meta, `landing.json` |
-| `11_build_featuremaps.py` | data and page of the feature-map viewer (`featuremaps/`) |
+| `11_build_featuremaps.py` | feature maps of the models (per model, inside the model's explorer directory) and the shared viewer page `featuremaps/` |
 | `20_build_lecture1.py` | the lecture-1 page with the toy fish data (`lecture1/index.html`) |
 | `22_reorganize_explorer.py` | one-off: migrate a flat explorer output into the per-model directories + `shared/` layout |
+| `23_reorganize_featuremaps.py` | one-off: migrate the feature-map data from one folder per painting to one folder per model |
+| `24_package_explorer.py` | zip the explorer per model type (pages + feature maps, and the embeddings separately) + a `00_base.zip` for the shared files, for download or weekly upload |
 | `relink_explorer.py` | rewrite the navigation (model types, weights, augmentation sets) in all existing pages after new pages were built; no recomputation |
 | `rerender_explorer.py` | re-render all pages with the current HTML/JS templates from the data already embedded in them (e.g. after a design change or new nudity flags) |
 | `check_explorer_pages.py` | print which kinds of pages are still missing (empty = everything built) |
