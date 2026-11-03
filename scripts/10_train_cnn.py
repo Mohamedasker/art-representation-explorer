@@ -4,7 +4,8 @@ Train a ResNet (supervised, multi-task classification) on ArtBench-10 + WikiArt.
 
 Targets (see src/datasets/labeled_union.py): style (union vocabulary), genre (WikiArt only) and
 artist (WikiArt + ArtBench images whose artist is in the vocabulary); missing labels are ignored.
-Train = both train splits, validation = both test splits.  Same run-directory / DDP / wandb /
+Train = both train splits, validation = both test splits (``--sources artbench`` or ``wikiart``
+restricts both to one dataset).  Same run-directory / DDP / wandb /
 resume conventions as scripts/07_train_autoencoder.py:
 
     runs/<YYYYmmdd-HHMMSS>_<name>/  config.json, vocab.json, checkpoints/, cnn_final.pt,
@@ -16,6 +17,7 @@ the unsupervised ones (scripts/02_extract_features.py --model cnn_supervised).
 Usage
 -----
     torchrun --standalone --nproc_per_node=4 scripts/10_train_cnn.py --epochs 30 --name cnn_resnet50
+    torchrun --standalone --nproc_per_node=4 scripts/10_train_cnn.py --epochs 30 --name cnn_resnet50_artbench --sources artbench
     torchrun --standalone --nproc_per_node=4 scripts/10_train_cnn.py --resume runs/<run>
 """
 
@@ -60,6 +62,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--runs-dir", type=str, default="runs")
     p.add_argument("--artbench-dir", type=str, default=default_data_dir("artbench"))
     p.add_argument("--wikiart-dir", type=str, default=default_data_dir("wikiart"))
+    p.add_argument("--sources", nargs="+", choices=SOURCES, default=list(SOURCES),
+                   help="Datasets to train and validate on (default: both). The heads keep the union vocabulary, "
+                        "so models are comparable; labels a dataset lacks (genre for ArtBench) are ignored")
     # model
     p.add_argument("--arch", type=str, default="resnet50", help="any timm model name")
     p.add_argument("--pretrained", action="store_true", help="start from ImageNet weights (default: from scratch)")
@@ -106,7 +111,7 @@ def build_data(args, vocab):
     val_tf = transforms.Compose([
         transforms.Resize(S, interpolation=bicubic, antialias=True), transforms.CenterCrop(S),
         transforms.ToTensor(), norm])
-    kw = dict(draft_size=S, vocab=vocab)
+    kw = dict(draft_size=S, vocab=vocab, sources=tuple(args.sources))
     train_ds = LabeledUnionDataset(args.artbench_dir, args.wikiart_dir, "train", train_tf, **kw)
     val_full = LabeledUnionDataset(args.artbench_dir, args.wikiart_dir, "test", val_tf, **kw)
     g = torch.Generator().manual_seed(1234)

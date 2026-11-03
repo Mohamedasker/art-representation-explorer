@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from src.datasets.artbench import STYLES as ARTBENCH_STYLES
-from src.datasets.union import UnionImageDataset
+from src.datasets.union import SOURCES, UnionImageDataset
 from src.datasets.wikiart import STYLES as WIKIART_STYLES
 from src.metadata import attributes as A
 
@@ -44,8 +44,9 @@ def build_vocab(wikiart_dir: str | Path) -> dict[str, list[str]]:
 class LabeledUnionDataset(UnionImageDataset):
     """``__getitem__`` -> ``(image, targets[3] = style/genre/artist, source_id)``."""
 
-    def __init__(self, artbench_root, wikiart_root, split, transform=None, draft_size=None, vocab=None):
-        super().__init__(artbench_root, wikiart_root, split, transform, draft_size)
+    def __init__(self, artbench_root, wikiart_root, split, transform=None, draft_size=None, vocab=None,
+                 sources=tuple(SOURCES)):
+        super().__init__(artbench_root, wikiart_root, split, transform, draft_size, sources)
         vocab = vocab or build_vocab(wikiart_root)
         self.vocab = vocab
         idx = {h: {n: i for i, n in enumerate(vocab[h])} for h in HEADS}

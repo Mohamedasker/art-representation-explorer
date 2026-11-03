@@ -32,6 +32,11 @@ def _simclr_info() -> list:
 
 # order shown on the page; (substring of the stem, short label, family, description)
 MODEL_INFO = [
+    ("cnn_supervised_artbench", "ResNet-50 (trained on ArtBench)", "Supervised, in-domain",
+     "Same recipe as the ResNet-50 above, but trained from scratch on ArtBench-10 train only (style head; the artist "
+     "labels that can be read from the file names are used as well, genre is not available)."),
+    ("cnn_supervised_wikiart", "ResNet-50 (trained on WikiArt)", "Supervised, in-domain",
+     "Same recipe as the ResNet-50 above, but trained from scratch on WikiArt train only (style, genre and artist heads)."),
     ("cnn_supervised", "ResNet-50 (trained here)", "Supervised, in-domain",
      "Trained from scratch on ArtBench + WikiArt to predict style, genre and artist (multi-task)."),
     ("resnet50_imagenet", "ResNet-50 (ImageNet)", "Supervised, off-the-shelf",

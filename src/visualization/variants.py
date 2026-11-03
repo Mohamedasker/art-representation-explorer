@@ -42,7 +42,10 @@ def variant_info(stem: str) -> dict | None:
 # (family key, title, [(member key, weights label)]).  A member key is the model part of a page stem
 # (``<dataset>_<model part>_<all|train|test>``) or its prefix (SimCLR: ``simclr_artbench_<augmentation set>``).
 FAMILIES = [
-    ("resnet50", "ResNet-50", [("cnn_supervised", "trained here (supervised)"), ("resnet50_imagenet", "ImageNet")]),
+    ("resnet50", "ResNet-50", [("cnn_supervised", "trained here (supervised)"),
+                               ("cnn_supervised_artbench", "trained here on ArtBench only"),
+                               ("cnn_supervised_wikiart", "trained here on WikiArt only"),
+                               ("resnet50_imagenet", "ImageNet")]),
     ("autoencoder", "Convolutional autoencoder", [("autoencoder", "trained here")]),
     ("mae", "MAE ViT-B/16", [("mae_imagenet", "ImageNet (frozen)"),
                              ("mae_adapt_artbench", "ImageNet, adapted on ArtBench"),

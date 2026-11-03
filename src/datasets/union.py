@@ -26,7 +26,7 @@ class UnionImageDataset(Dataset):
     """Images from ArtBench-10 and/or WikiArt for one split.
 
     ``__getitem__`` returns ``(image, source_id)`` where ``source_id`` indexes
-    :data:`SOURCES`.
+    :data:`SOURCES` (also when ``sources`` restricts the dataset to one of them).
     """
 
     def __init__(
@@ -36,6 +36,7 @@ class UnionImageDataset(Dataset):
         split: str,
         transform: Optional[Callable] = None,
         draft_size: int | None = None,
+        sources: tuple[str, ...] = tuple(SOURCES),
     ) -> None:
         self.transform = transform
         self.draft_size = draft_size
@@ -44,6 +45,8 @@ class UnionImageDataset(Dataset):
         for sid, (cls, root) in enumerate(
             [(ArtBenchDataset, artbench_root), (WikiArtDataset, wikiart_root)]
         ):
+            if SOURCES[sid] not in sources:
+                continue
             paths = cls(root, split=split).get_paths()
             self.paths += paths
             self.sources += [sid] * len(paths)

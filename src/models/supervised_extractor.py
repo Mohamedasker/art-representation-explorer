@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import json
+
 import torch
 from torchvision import transforms
 
@@ -46,6 +48,13 @@ class SupervisedCNNExtractor(BaseExtractor):
         with torch.autocast(self.device.type, dtype=torch.bfloat16, enabled=self.device.type == "cuda"):
             f = self.model.embed(batch)
         return f.float()
+
+    @property
+    def file_slug(self) -> str:
+        """``cnn_supervised`` for the joint run, ``cnn_supervised_<dataset>`` for a run trained on one dataset only."""
+        cfg = self._run / "config.json"
+        sources = json.loads(cfg.read_text())["args"].get("sources") if cfg.exists() else None
+        return f"cnn_supervised_{sources[0]}" if sources and len(sources) == 1 else "cnn_supervised"
 
     @property
     def model_name(self) -> str:
