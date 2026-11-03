@@ -275,6 +275,7 @@ shared/thumbs/, shared/meta/   per-image files used by every model page - upload
     artbench_<weights>_all.html, wikiart_<weights>_all.html, ... (all its weights, both datasets, every sample / split view)
     featuremaps/<model>/       feature maps of that model's layers: meta.json + <painting id>/{stats.json, <model>__<layer>__*.jpg|png}
 lecture1/index.html            lecture 1: toy fish data
+mnist/                         MNIST explorer (exercise sheet): self-contained, own index.html + pages/ + shared/meta/ (see "MNIST: exercise notebook and explorer")
 featuremaps/                   feature-map viewer: index.html, index.json (paintings, model -> directory), inputs/<id>.jpg - upload once
 cache/                         build intermediates for scripts/08_build_explorer.py - not needed to view the pages, do not upload
 ```
@@ -514,6 +515,38 @@ UMAP `a`, `b` and fuzzy graph (identical up to ties from the 0.1 cm rounding) an
 
 ---
 
+## MNIST: exercise notebook and explorer
+
+Kept apart from the lecture content: the notebook lives in `exercise_sheets/`, the explorer in its own self-contained folder `visualizations/explorer/mnist/`
+(not linked from the art overview, which stays untouched).
+
+**`exercise_sheets/mnist_pca_cnn_tsne_umap.ipynb`** (runs outside this repo; downloads MNIST with torchvision, `pip install umap-learn` if missing):
+1. PCA of the 784-D pixel space by hand (covariance, `eigh`, checked against scikit-learn): mean image, scree plot, the first 16 components as images,
+   walking along a component, the images with the lowest / highest score, PC1/PC2 scatter, reconstruction from k components;
+2. the `SmallCNN` of exercise sheet 1 for 1 x 28 x 28 images, trained for 5 epochs (99.2 % test accuracy);
+3. intermediate representations with forward hooks (pixels, conv1, conv2, conv3, fc, logits), trained and random-init network, feature maps of one digit;
+4. PCA of every layer (variance curves, PC1/PC2, digit x component heatmaps, PCA over channels as RGB maps), 10-NN accuracy per layer;
+5. t-SNE (pixels, conv3) and UMAP (all layers, trained and random init) of 2,000 test images, plus exercises. The saved outputs are from a real run.
+
+**MNIST explorer** (`python scripts/30_build_mnist_explorer.py`): the art explorer's page (same template, `src/visualization/explorer.py`) for the 10,000 test images in
+11 representations: `mnist_pixels` and, for each of conv1, conv2, conv3, fc, logits (`src/models/mnist_cnn.py`), the trained network and the same network at random init.
+Pages have UMAP and PCA maps (t-SNE only for the pixels and conv3: it takes ~10 min per page), k-means, nearest neighbours, interpolation, and can be coloured by digit,
+CNN prediction / correctness / confidence, ink and slant. The "Weights" menu switches trained / random init, the header links switch layers.
+
+```
+visualizations/explorer/mnist/
+    index.html           one UMAP preview + leave-one-out 10-NN accuracy per representation, trained vs random init
+    pages/<stem>.html    mnist_pixels, mnist_cnn_<layer>_<trained|random>
+    shared/meta/         labels, thumbnails (data URIs), per-image attributes - shared by the pages
+    cache/               projections / clusters / landing.json (not needed to view)
+```
+The CNN (8 epochs, Adam) is saved in `runs/mnist_cnn/` (`--retrain` to train again); MNIST goes to `data/mnist/`. About an hour on a login node
+(run the layers as parallel processes with `--reps conv1:trained conv1:random` etc.; `--index-only` rewrites the overview). The explorer template got
+three optional payload fields for this (`noun`, `home`, `default_color`) and hides the painting-only colourings when a page has no such data;
+the art pages are unchanged.
+
+---
+
 ## Using representations programmatically
 
 ```python
@@ -585,6 +618,7 @@ The two-digit prefixes order the pipeline but are **not unique**: the branch `ex
 | `08_build_explorer.py` | the main build: projections (UMAP, t-SNE, PCA), k-means, colour maps and the pages of one representation, shared thumbnails / meta, `landing.json` |
 | `11_build_featuremaps.py` | feature maps of the models (per model, inside the model's explorer directory) and the shared viewer page `featuremaps/` |
 | `20_build_lecture1.py` | the lecture-1 page with the toy fish data (`lecture1/index.html`) |
+| `30_build_mnist_explorer.py` | trains the exercise-sheet CNN on MNIST and builds the MNIST explorer (`mnist/`): pixels + every layer, trained and random-init |
 | `22_reorganize_explorer.py` | one-off: migrate a flat explorer output into the per-model directories + `shared/` layout |
 | `23_reorganize_featuremaps.py` | one-off: migrate the feature-map data from one folder per painting to one folder per model |
 | `24_package_explorer.py` | zip the explorer per model type (pages + feature maps, and the embeddings separately) + a `00_base.zip` for the shared files, for download or weekly upload |
@@ -621,6 +655,7 @@ art-representation-explorer/
 ├── scripts/                 # Entry-point CLI scripts and slurm/ batch wrappers (see "Scripts" above)
 ├── configs/                 # augmentation sets (aug_sets.yaml)
 ├── docs/                    # run notes and result tables
+├── exercise_sheets/         # exercise notebooks for the course (not part of the lecture content), e.g. MNIST PCA / CNN / t-SNE / UMAP
 ├── src/
 │   ├── datasets/
 │   │   ├── artbench.py      # ArtBench PyTorch Dataset

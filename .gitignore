@@ -33,6 +33,9 @@ representations/
 # Outputs
 visualizations/
 
+# Exercise sheets (notebooks and material for the course, not part of the repo)
+exercise_sheets/
+
 # IDE
 .vscode/
 .idea/

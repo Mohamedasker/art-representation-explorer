@@ -196,6 +196,9 @@ function hydrate(d) {
 <script>
 const D = hydrate(__DATA__);
 const N = D.n, NC = D.classes.length;
+// wording and overview link: the defaults are those of the art pages; other datasets (MNIST ...) set D.noun / D.home
+const NOUN = D.noun || "art style", NOUNS = NOUN + "s", NOUNS_CAP = NOUNS[0].toUpperCase() + NOUNS.slice(1);
+const HOME = D.home || { href: "../index.html", label: "overview" };
 const TAB20 = ["#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd","#8c564b","#e377c2","#7f7f7f",
   "#bcbd22","#17becf","#aec7e8","#ffbb78","#98df8a","#ff9896","#c5b0d5","#c49c94","#f7b6d2",
   "#c7c7c7","#dbdb8d","#9edae5"];
@@ -258,14 +261,17 @@ for (const [key, s] of Object.entries(D.spaces)) spacesel.add(new Option(s, key)
 for (const k of D.ks) ksel.add(new Option(String(k), String(k)));
 projsel.value = D.default_proj in D.proj ? D.default_proj : Object.keys(D.proj)[0];
 ksel.value = String(D.ks.includes(D.default_k) ? D.default_k : D.ks[0]);
+if (D.default_color) colorsel.value = D.default_color;               // e.g. "style" (= the class) for MNIST
 $("subtitle").textContent = D.subtitle;
+if (D.noun) for (const e of document.querySelectorAll("#colorsel option, #selorder option, #comptitle"))
+  e.textContent = e.textContent.replace("art styles", NOUNS).replace("Art styles", NOUNS_CAP).replace("art style", NOUN);
 if ((D.sets || []).length > 1) {                 // other sample sets / the full dataset of this representation
   $("setwrap").hidden = false;
   for (const st of D.sets) { const o = new Option(st.label, st.href); if (st.current) o.selected = true; $("setsel").add(o); }
   $("setsel").value = (D.sets.find(x => x.current) || D.sets[0]).href;
   $("setsel").addEventListener("change", () => { location.href = $("setsel").value; });
 }
-$("nav").innerHTML = `<a href="../index.html">&#8962; overview</a> &middot; ` + D.siblings.map(s =>
+$("nav").innerHTML = `<a href="${HOME.href}">&#8962; ${HOME.label}</a> &middot; ` + D.siblings.map(s =>
   `<a href="${s.href}" class="${s.current ? "cur" : ""}">${s.name}</a>`).join("");
 if ((D.weights || []).length > 1) {             // other weights of this model type (e.g. MAE: ImageNet / adapted / from scratch)
   $("wtwrap").hidden = false;
@@ -278,7 +284,7 @@ if ((D.variants || []).length > 1) {            // variants of this model (e.g. 
   $("varsel").addEventListener("change", () => { location.href = $("varsel").value; });
 }
 if (D.siblings.length > 8) {                     // many models: a drop-down instead of a link per model
-  $("nav").innerHTML = `<a href="../index.html">&#8962; overview</a> &middot; <select id="navsel" title="other model types of this dataset">` +
+  $("nav").innerHTML = `<a href="${HOME.href}">&#8962; ${HOME.label}</a> &middot; <select id="navsel" title="other model types of this dataset">` +
     D.siblings.map(s => `<option value="${s.href}"${s.current ? " selected" : ""}>${s.name}</option>`).join("") + `</select>`;
   $("navsel").addEventListener("change", () => { location.href = $("navsel").value; });
 }
@@ -341,6 +347,9 @@ const hasYear = YEARS.some(v => v !== null);
 let YR = [0, 1];
 if (hasYear) { const known = YEARS.filter(v => v !== null); YR = [pct(known, .02), pct(known, .98)]; }
 else colorsel.querySelector('option[value="year"]').remove();
+for (const [opt, ok] of [["theme", D.theme], ["dominant", D.pal_c], ["dominant_ref", D.dom_ref && D.ref_colors],
+                         ["light", D.light], ["chroma", D.chroma]])      // painting-only colourings: only if the page has the data
+  if (!ok) colorsel.querySelector(`option[value="${opt}"]`).remove();
 
 // extra attributes (dataset metadata, title keywords, CLIP zero-shot): one option per attribute, grouped
 const ATTRS = D.attrs || [];
@@ -476,7 +485,7 @@ function computeKnn() {
   ov = { kind: "knn", q: qpt, ids, sims };
   const same = ids.filter(j => D.lab[j] === D.lab[qpt]).length;
   $("modetitle").textContent = "Nearest neighbours";
-  $("modehelp").innerHTML = `Query: <b>${D.classes[D.lab[qpt]]}</b> · ${same} / ${K} neighbours share its art style ` +
+  $("modehelp").innerHTML = `Query: <b>${D.classes[D.lab[qpt]]}</b> · ${same} / ${K} neighbours share its ${NOUN} ` +
     `(${Math.round(100 * same / K)}%). Cosine similarity in the full embedding space. Click an image to re-query.`;
   $("strip").innerHTML = figure(qpt, "query · " + D.classes[D.lab[qpt]], tag(qpt, "Q", MC), 'style="outline-color:' + MC + '"') +
     ids.map((j, r) => figure(j, `${sims[r].toFixed(2)} · ${D.classes[D.lab[j]]}`, tag(j, r + 1, "#fff"))).join("");
@@ -604,8 +613,8 @@ function draw() {
   const isTheme = colorsel.value === "theme";
   const m = isTheme ? (D.theme_metrics || {})[curK()] : (D.metrics[spacesel.value] || {})[curK()];
   $("metrics").textContent = !m ? "" : isTheme ?
-    `colour themes, k=${curK()}: ARI vs style ${m.ari.toFixed(3)} · NMI ${m.nmi.toFixed(3)}` :
-    `k=${curK()} (${D.spaces[spacesel.value]}): silhouette ${m.sil.toFixed(3)} · ARI vs style ${m.ari.toFixed(3)} · NMI ${m.nmi.toFixed(3)}`;
+    `colour themes, k=${curK()}: ARI vs ${D.noun || "style"} ${m.ari.toFixed(3)} · NMI ${m.nmi.toFixed(3)}` :
+    `k=${curK()} (${D.spaces[spacesel.value]}): silhouette ${m.sil.toFixed(3)} · ARI vs ${D.noun || "style"} ${m.ari.toFixed(3)} · NMI ${m.nmi.toFixed(3)}`;
 }
 
 // ── side panel ──
@@ -618,7 +627,7 @@ function show(i) {
   }
   $("thumb").src = thumb(i);
   const k = curK(), rows = [["sample", `${i}  (file ${D.idx[i]})`], ["file", D.files[i]],
-    ["art style", D.classes[D.lab[i]]]];
+    [NOUN, D.classes[D.lab[i]]]];
   for (const [key, name] of Object.entries(D.spaces))
     rows.push([`cluster, ${key}`, `${D.clusters[key][k][i]} / ${k}`]);
   if (hasYear) rows.push(["year", YEARS[i] === null ? "unknown" : YEARS[i]]);
@@ -631,7 +640,7 @@ function show(i) {
     } else if (a.kind === "color") {
       if (a.v[i] >= 0) rows.push([a.label, `<span class="chips"><b style="background:${hex(a.v[i])};width:28px"></b></span> ${hex(a.v[i])}`]);
     } else if (a.v[i] !== null && a.group.startsWith("CLIP")) nums.push([(a.v[i] - a.mean) / a.std, a.label]);
-    else if (a.v[i] !== null) rows.push([a.label, a.v[i]]);
+    else if (a.v[i] !== null) rows.push([a.label, Number.isInteger(a.v[i]) ? a.v[i] : +a.v[i].toPrecision(4)]);
   }
   if (ATTRS.some(isTag)) rows.push(["title keywords", tags.length ? tags.join(", ") : "—"]);
   if (nums.length) rows.push(["CLIP top concepts", nums.sort((p, q) => q[0] - p[0]).slice(0, 3)
@@ -702,7 +711,7 @@ function renderGroup() {
   if (pick.length && nHid) $("groupn").textContent += ` (+ ${nHid.toLocaleString()} hidden as explicit)`;
   // composition of the group by art style
   const cnt = Array(NC).fill(0); m.forEach(i => cnt[D.lab[i]]++);
-  $("comptitle").textContent = "Art styles in this group";
+  $("comptitle").textContent = NOUNS_CAP + " in this group";
   $("comp").innerHTML = cnt.map((v, j) => [v, j]).filter(a => a[0] > 0).sort((a, b) => b[0] - a[0]).slice(0, 8).map(([v, j]) =>
     `<div class="bar"><span class="n">${D.classes[j]}</span><span class="b"><i style="width:${100 * v / m.length}%;background:${STYLE_PAL[j]}"></i></span>
      <span class="p">${(100 * v / m.length).toFixed(0)}%</span></div>`).join("");
@@ -714,7 +723,7 @@ const listView = () => selView() || groupView();
 function updateSide() {
   const sel = selView(), grp = !sel && groupView();
   $("selcard").hidden = !sel; $("groupcard").hidden = !grp; $("samplecard").hidden = sel || grp;
-  if (!sel && !grp) { hilite = -1; $("tip").hidden = true; $("comptitle").textContent = "Art styles in this cluster"; }
+  if (!sel && !grp) { hilite = -1; $("tip").hidden = true; $("comptitle").textContent = NOUNS_CAP + " in this cluster"; }
   if (sel) renderSelection(); else if (grp) renderGroup();
 }
 function tip(i, mx, my) {
@@ -801,7 +810,7 @@ function renderSelection() {
   $("selgallery").innerHTML = pick.map(i => `<figure data-i="${i}"><img src="${thumb(i)}" loading="lazy">
     <figcaption>${D.classes[D.lab[i]]}</figcaption></figure>`).join("");
   const cnt = Array(NC).fill(0); selList.forEach(i => cnt[D.lab[i]]++);
-  $("comptitle").textContent = "Art styles in the selection";
+  $("comptitle").textContent = NOUNS_CAP + " in the selection";
   $("comp").innerHTML = cnt.map((v, j) => [v, j]).filter(a => a[0] > 0).sort((a, b) => b[0] - a[0]).slice(0, 8).map(([v, j]) =>
     `<div class="bar"><span class="n">${D.classes[j]}</span><span class="b"><i style="width:${100 * v / n}%;background:${STYLE_PAL[j]}"></i></span>
      <span class="p">${(100 * v / n).toFixed(0)}%</span></div>`).join("");
